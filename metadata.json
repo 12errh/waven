@@ -1,0 +1,6 @@
+{
+  "name": "WAVEN",
+  "description": "Spatial frosted-glass music player to discover, search, upload, and play all your favorite music.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,16 @@
+node_modules/
+.next/
+coverage/
+.DS_Store
+*.log
+*.tsbuildinfo
+.env*
+!.env.example
+
+# Desktop build output
+frontend/out/
+build/bin/
+dist/
+*.exe
+*.app
+
