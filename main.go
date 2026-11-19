@@ -43,6 +43,12 @@ func main() {
 	app.RegisterService(application.NewService(libraryService))
 
 	shell := desktop.New(app)
+	playerService, err := desktop.NewPlayerService(app, libraryService, shell)
+	if err != nil {
+		log.Fatal(err)
+	}
+	app.RegisterService(application.NewService(playerService))
+
 	shell.Start()
 
 	if err := app.Run(); err != nil {

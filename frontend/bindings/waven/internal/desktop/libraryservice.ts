@@ -81,11 +81,21 @@ export function GetLikedIDs(): $CancellablePromise<number[]> {
 }
 
 /**
+ * GetMix returns one of the in-library mixes used by Discover. Kinds are
+ * "recently_added", "recently_played", "on_repeat", and "favorites".
+ */
+export function GetMix(kind: string, limit: number): $CancellablePromise<$models.Track[]> {
+    return $Call.ByID(1340074113, kind, limit).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+/**
  * GetStats returns library counters and artwork cache size.
  */
 export function GetStats(): $CancellablePromise<$models.LibraryStats> {
     return $Call.ByID(333328140).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
@@ -94,7 +104,7 @@ export function GetStats(): $CancellablePromise<$models.LibraryStats> {
  */
 export function GetTrack(id: number): $CancellablePromise<$models.Track> {
     return $Call.ByID(619347548, id).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType7($result);
     });
 }
 
@@ -103,7 +113,7 @@ export function GetTrack(id: number): $CancellablePromise<$models.Track> {
  */
 export function GetTracks(query: $models.TrackQuery): $CancellablePromise<$models.TrackPage> {
     return $Call.ByID(1277469693, query).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType10($result);
     });
 }
 
@@ -134,7 +144,7 @@ export function Rescan(folderID: number): $CancellablePromise<void> {
  */
 export function ScanStatus(): $CancellablePromise<$models.ScanStatus> {
     return $Call.ByID(3789815332).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType11($result);
     });
 }
 
@@ -143,7 +153,7 @@ export function ScanStatus(): $CancellablePromise<$models.ScanStatus> {
  */
 export function Search(query: string, limit: number): $CancellablePromise<$models.SearchResults> {
     return $Call.ByID(3692877971, query, limit).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType12($result);
     });
 }
 
@@ -169,8 +179,9 @@ const $$createType3 = $Create.Array($$createType0);
 const $$createType4 = $models.Genre.createFrom;
 const $$createType5 = $Create.Array($$createType4);
 const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = $models.LibraryStats.createFrom;
-const $$createType8 = $models.Track.createFrom;
-const $$createType9 = $models.TrackPage.createFrom;
-const $$createType10 = $models.ScanStatus.createFrom;
-const $$createType11 = $models.SearchResults.createFrom;
+const $$createType7 = $models.Track.createFrom;
+const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = $models.LibraryStats.createFrom;
+const $$createType10 = $models.TrackPage.createFrom;
+const $$createType11 = $models.ScanStatus.createFrom;
+const $$createType12 = $models.SearchResults.createFrom;

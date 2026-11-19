@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { computeSeekTime, formatTimeMMSS, formatTrackQuality } from '@/lib/player-logic';
 import type { Playlist, RepeatMode, Track } from '@/lib/types';
 import { CoverImage } from './CoverImage';
+import { Visualizer } from './Visualizer';
 
 interface NowPlayingCardProps {
   track: Track | null;
@@ -45,6 +46,7 @@ interface NowPlayingCardProps {
   onAddToPlaylist: (playlistId: string, trackId: number) => void;
   onOpenQueue: () => void;
   onOpenLibrary: () => void;
+  readAnalyser: (target: Uint8Array) => boolean;
 }
 
 export function NowPlayingCard({
@@ -71,6 +73,7 @@ export function NowPlayingCard({
   onAddToPlaylist,
   onOpenQueue,
   onOpenLibrary,
+  readAnalyser,
 }: NowPlayingCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
 
@@ -241,8 +244,13 @@ export function NowPlayingCard({
           </span>
         </div>
 
+        {/* Analyser-driven visualizer; idles while paused */}
+        <div className="mt-3 h-7 overflow-hidden rounded-lg bg-black/10">
+          <Visualizer read={readAnalyser} active={isPlaying} bars={30} />
+        </div>
+
         {/* Interactive Progress Bar */}
-        <div className="mt-4">
+        <div className="mt-3">
           <div
             role="slider"
             tabIndex={0}

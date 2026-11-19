@@ -1,4 +1,4 @@
-import type { Playlist, RepeatMode, Track } from './types';
+import type { Playlist, PlayerSession, RepeatMode, Track } from './types';
 
 /**
  * Formats seconds as MM:SS with zero-padded minutes and seconds (e.g. 00:43, 03:12).
@@ -82,46 +82,207 @@ export function formatRelativeTime(timestamp: number): string {
 }
 
 /**
- * Computes the next track ID given the current queue, active ID, shuffle, and repeat settings.
- * Returns null when a non-looping queue reaches its end.
+ * Builds a stable shuffle order for a queue. The active track is placed first
+ * so toggling shuffle never changes what is playing; the rest are shuffled with
+ * a Fisher-Yates pass. The order is persisted in the session so next/previous
+ * stay predictable across restarts.
+ */
+export function buildShuffleOrder(
+  queueIds: number[],
+  currentTrackId: number | null,
+  randomFn: () => number = Math.random
+): number[] {
+  const unique = dedupeIds(queueIds);
+  if (unique.length === 0) return [];
+  const rest = unique.filter((id) => id !== currentTrackId);
+  for (let index = rest.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(randomFn() * (index + 1));
+    [rest[index], rest[swap]] = [rest[swap], rest[index]];
+  }
+  return currentTrackId !== null && unique.includes(currentTrackId)
+    ? [currentTrackId, ...rest]
+    : rest;
+}
+
+/**
+ * Returns the order playback follows. Shuffle uses the saved order, dropping
+ * removed tracks and appending tracks added later; sequential playback follows
+ * the queue itself.
+ */
+export function getPlaybackOrder(
+  queueIds: number[],
+  shuffle: boolean,
+  shuffleOrder: number[]
+): number[] {
+  if (!shuffle) return queueIds;
+  const queued = new Set(queueIds);
+  const order: number[] = [];
+  const seen = new Set<number>();
+  for (const id of shuffleOrder) {
+    if (queued.has(id) && !seen.has(id)) {
+      order.push(id);
+      seen.add(id);
+    }
+  }
+  for (const id of queueIds) {
+    if (!seen.has(id)) {
+      order.push(id);
+      seen.add(id);
+    }
+  }
+  return order;
+}
+
+/**
+ * Computes the next track ID for the current queue and playback mode.
+ *
+ * `autoAdvance` distinguishes a natural track ending from a manual next press:
+ * repeat-one only replays on a natural ending, while an explicit next always
+ * moves on. Repeat-off returns null at the end of the order.
  */
 export function getNextTrackId(params: {
   queueIds: number[];
   currentTrackId: number;
   shuffle: boolean;
   repeat: RepeatMode;
+  shuffleOrder?: number[];
+  autoAdvance?: boolean;
   randomFn?: () => number;
 }): number | null {
-  const { queueIds, currentTrackId, shuffle, repeat, randomFn = Math.random } = params;
+  const {
+    queueIds,
+    currentTrackId,
+    shuffle,
+    repeat,
+    shuffleOrder = [],
+    autoAdvance = false,
+    randomFn = Math.random,
+  } = params;
   if (queueIds.length === 0) return null;
-  if (repeat === 'one') return currentTrackId;
+  if (repeat === 'one' && autoAdvance) return currentTrackId;
 
-  const currentIdx = queueIds.indexOf(currentTrackId);
+  const order =
+    shuffle && shuffleOrder.length > 0
+      ? getPlaybackOrder(queueIds, true, shuffleOrder)
+      : shuffle
+        ? buildShuffleOrder(queueIds, currentTrackId, randomFn)
+        : queueIds;
+  if (order.length === 0) return null;
 
-  if (shuffle && queueIds.length > 1) {
-    const candidates = queueIds.filter((id) => id !== currentTrackId);
-    const pickIdx = Math.floor(randomFn() * candidates.length);
-    return candidates[Math.max(0, Math.min(candidates.length - 1, pickIdx))];
-  }
-
-  if (currentIdx === -1) return queueIds[0];
-  if (currentIdx < queueIds.length - 1) return queueIds[currentIdx + 1];
-  return repeat === 'all' ? queueIds[0] : null;
+  const currentIdx = order.indexOf(currentTrackId);
+  if (currentIdx === -1) return order[0];
+  if (currentIdx < order.length - 1) return order[currentIdx + 1];
+  return repeat === 'all' ? order[0] : null;
 }
 
 /**
- * Computes the previous track ID given the current queue and elapsed playback seconds.
- * If elapsed > 3 seconds, callers restart current track; otherwise step back.
+ * Computes the previous track ID. At the top of the queue repeat-all wraps to
+ * the end; otherwise callers restart the current track.
  */
 export function getPrevTrackId(params: {
   queueIds: number[];
   currentTrackId: number;
+  shuffle?: boolean;
+  shuffleOrder?: number[];
+  repeat?: RepeatMode;
 }): number | null {
-  const { queueIds, currentTrackId } = params;
+  const {
+    queueIds,
+    currentTrackId,
+    shuffle = false,
+    shuffleOrder = [],
+    repeat = 'off',
+  } = params;
   if (queueIds.length === 0) return null;
-  const currentIdx = queueIds.indexOf(currentTrackId);
-  if (currentIdx <= 0) return queueIds[queueIds.length - 1];
-  return queueIds[currentIdx - 1];
+  const order = getPlaybackOrder(queueIds, shuffle, shuffleOrder);
+  if (order.length === 0) return null;
+  const currentIdx = order.indexOf(currentTrackId);
+  if (currentIdx === -1) return order[0];
+  if (currentIdx > 0) return order[currentIdx - 1];
+  return repeat === 'all' && order.length > 1 ? order[order.length - 1] : null;
+}
+
+/** Removes duplicate and non-positive ids while preserving order. */
+export function dedupeIds(ids: number[]): number[] {
+  const seen = new Set<number>();
+  const unique: number[] = [];
+  for (const id of ids) {
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique;
+}
+
+/**
+ * Coerces a stored or partially built session into the shape the player and
+ * the Go store expect. Unknown repeat values fall back to `off`; the active
+ * track is kept only when it is part of the queue.
+ */
+export function normalizePlayerSession(raw: Partial<PlayerSession> | null | undefined): PlayerSession {
+  const queueIds = dedupeIds(Array.isArray(raw?.queueIds) ? raw.queueIds : []);
+  const repeat: RepeatMode =
+    raw?.repeat === 'all' || raw?.repeat === 'one' ? raw.repeat : 'off';
+  const volume = Number(raw?.volume);
+  const positionMs = Number(raw?.positionMs);
+  let trackId = Number(raw?.trackId) > 0 ? Math.trunc(Number(raw?.trackId)) : 0;
+  if (queueIds.length > 0 && !queueIds.includes(trackId)) trackId = queueIds[0];
+  if (queueIds.length === 0) trackId = 0;
+
+  const shuffle = Boolean(raw?.shuffle);
+  let shuffleOrder = dedupeIds(
+    Array.isArray(raw?.shuffleOrder) ? raw.shuffleOrder : []
+  ).filter((id) => queueIds.includes(id));
+  if (shuffle) {
+    if (shuffleOrder.length === 0 && queueIds.length > 0) {
+      // Older sessions may not have stored an order. Build one that starts
+      // from the active track so enabling shuffle never jumps playback.
+      shuffleOrder = buildShuffleOrder(queueIds, trackId > 0 ? trackId : null);
+    } else {
+      // Preserve the saved order exactly. Moving the current track to the
+      // front would silently change which track "next" and "previous" mean.
+      const seen = new Set(shuffleOrder);
+      for (const id of queueIds) {
+        if (!seen.has(id)) {
+          shuffleOrder.push(id);
+          seen.add(id);
+        }
+      }
+    }
+  }
+
+  return {
+    trackId,
+    positionMs: Number.isFinite(positionMs) ? Math.max(0, Math.round(positionMs)) : 0,
+    queueIds,
+    queueIndex: Math.max(0, queueIds.indexOf(trackId)),
+    shuffle,
+    shuffleOrder,
+    repeat,
+    volume: Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 0.8,
+    muted: Boolean(raw?.muted),
+    updatedAt: Number(raw?.updatedAt) > 0 ? Math.trunc(Number(raw?.updatedAt)) : 0,
+  };
+}
+
+/**
+ * Clamps a resumed position before the end of the track, leaving two seconds
+ * so playback never restores in an immediately-ended state.
+ */
+export function clampResumeSeconds(positionMs: number, durationSec: number): number {
+  const position = Number.isFinite(positionMs) ? Math.max(0, positionMs / 1000) : 0;
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return position;
+  const limit = Math.max(0, durationSec - 2);
+  return Math.min(position, limit);
+}
+
+/**
+ * The position at which a listen counts as a play: 30 seconds or half the
+ * track, whichever comes first.
+ */
+export function playRecordThresholdSeconds(durationSec: number): number {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return 30;
+  return Math.min(30, durationSec / 2);
 }
 
 /**

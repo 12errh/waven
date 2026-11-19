@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -351,6 +352,89 @@ func TestMissingTracksAndFolderCascade(t *testing.T) {
 	all, err = st.ListTracks(TrackFilter{IncludeMissing: true})
 	if err != nil || all.Total != 0 {
 		t.Fatalf("tracks after folder removal = %+v, %v", all, err)
+	}
+}
+
+func TestPlayHistoryAndMixes(t *testing.T) {
+	st := openTestStore(t)
+	folder, _ := st.AddFolder("/music")
+	records := []TrackRecord{
+		sampleRecord(folder.ID, "/music/a.mp3", "Alpha", "Artist", "Album", 1),
+		sampleRecord(folder.ID, "/music/b.mp3", "Beta", "Artist", "Album", 1),
+		sampleRecord(folder.ID, "/music/c.mp3", "Gamma", "Artist", "Album", 1),
+	}
+	if err := st.UpsertTracks(records); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.ListTracks(TrackFilter{Sort: "title"})
+	if err != nil || page.Total != 3 {
+		t.Fatalf("ListTracks = %+v, %v", page, err)
+	}
+	alpha, beta, gamma := page.Tracks[0], page.Tracks[1], page.Tracks[2]
+	now := time.Now().UnixMilli()
+
+	if err := st.RecordPlay(alpha.ID, now-3_000, 30_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordPlay(beta.ID, now-2_000, 45_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordPlay(alpha.ID, now-1_000, 60_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordPlay(alpha.ID, now, 70_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordPlay(gamma.ID, now-24*60*60*1000, 20_000); err != nil {
+		t.Fatal(err)
+	}
+
+	recent, err := st.RecentlyPlayed(10)
+	if err != nil {
+		t.Fatalf("RecentlyPlayed: %v", err)
+	}
+	if len(recent) != 3 || recent[0].ID != alpha.ID || recent[1].ID != beta.ID || recent[2].ID != gamma.ID {
+		t.Fatalf("recent order = %+v", recent)
+	}
+
+	repeated, err := st.OnRepeat(10, 14, 3)
+	if err != nil {
+		t.Fatalf("OnRepeat: %v", err)
+	}
+	if len(repeated) != 1 || repeated[0].ID != alpha.ID {
+		t.Fatalf("on repeat = %+v", repeated)
+	}
+
+	// A track missing from disk is excluded from both mixes.
+	if err := st.TouchTracks(folder.ID, 2, []string{records[0].Path, records[2].Path}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.MarkMissing(folder.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	recent, err = st.RecentlyPlayed(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, track := range recent {
+		if track.ID == beta.ID {
+			t.Fatal("missing track leaked into RecentlyPlayed")
+		}
+	}
+
+	present, err := st.ExistingTrackIDs([]int64{alpha.ID, beta.ID, 99999, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !present[alpha.ID] || present[beta.ID] || present[99999] || present[0] {
+		t.Fatalf("ExistingTrackIDs = %+v", present)
+	}
+
+	if err := st.RecordPlay(99999, now, 1); err == nil {
+		t.Fatal("RecordPlay accepted a non-existent track")
+	}
+	if err := st.RecordPlay(0, now, 1); err == nil {
+		t.Fatal("RecordPlay accepted an empty track id")
 	}
 }
 

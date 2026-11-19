@@ -403,6 +403,139 @@ func (s *Store) LikedIDs() ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// RecordPlay appends a completed listen to the play history. startedAt is a
+// Unix-millisecond timestamp; a zero value means "now". A track must exist for
+// the insert to succeed (the plays table enforces the foreign key).
+func (s *Store) RecordPlay(trackID, startedAt, msPlayed int64) error {
+	if trackID <= 0 {
+		return errors.New("track id is required")
+	}
+	if startedAt <= 0 {
+		startedAt = time.Now().UnixMilli()
+	}
+	if msPlayed < 0 {
+		msPlayed = 0
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO plays (track_id, started_at, ms_played) VALUES (?, ?, ?)`,
+		trackID, startedAt, msPlayed,
+	)
+	return err
+}
+
+// RecentlyPlayed returns distinct tracks ordered by their latest play.
+func (s *Store) RecentlyPlayed(limit int) ([]Track, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := s.db.Query(`
+SELECT `+trackColumns+`
+FROM tracks
+JOIN (
+    SELECT track_id, MAX(started_at) AS last_played
+    FROM plays
+    GROUP BY track_id
+    ORDER BY last_played DESC
+    LIMIT ?
+) recent ON recent.track_id = tracks.id
+WHERE tracks.missing = 0
+ORDER BY recent.last_played DESC`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTracks(rows)
+}
+
+// OnRepeat returns tracks played at least minPlays times in the last days.
+func (s *Store) OnRepeat(limit, days, minPlays int) ([]Track, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if days <= 0 {
+		days = 14
+	}
+	if minPlays <= 0 {
+		minPlays = 3
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+	rows, err := s.db.Query(`
+SELECT `+trackColumns+`
+FROM tracks
+JOIN (
+    SELECT track_id, COUNT(*) AS play_count, MAX(started_at) AS last_played
+    FROM plays
+    WHERE started_at >= ?
+    GROUP BY track_id
+    HAVING COUNT(*) >= ?
+    ORDER BY play_count DESC, last_played DESC
+    LIMIT ?
+) repeated ON repeated.track_id = tracks.id
+WHERE tracks.missing = 0
+ORDER BY repeated.play_count DESC, repeated.last_played DESC`, cutoff, minPlays, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTracks(rows)
+}
+
+// ExistingTrackIDs returns the subset of ids that are present in the library.
+// It is used to prune a restored queue before the frontend hydrates it.
+func (s *Store) ExistingTrackIDs(ids []int64) (map[int64]bool, error) {
+	present := make(map[int64]bool, len(ids))
+	const chunkSize = 500
+	for start := 0; start < len(ids); start += chunkSize {
+		end := min(start+chunkSize, len(ids))
+		chunk := ids[start:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		rows, err := s.db.Query(
+			`SELECT id FROM tracks WHERE missing = 0 AND id IN (`+strings.Join(placeholders, ",")+`)`,
+			args...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			present[id] = true
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return present, nil
+}
+
+func scanTracks(rows *sql.Rows) ([]Track, error) {
+	tracks := make([]Track, 0)
+	for rows.Next() {
+		track, err := scanTrack(rows)
+		if err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, track)
+	}
+	return tracks, rows.Err()
+}
+
 // SetLiked updates the heart state for a track.
 func (s *Store) SetLiked(id int64, liked bool) error {
 	v := 0

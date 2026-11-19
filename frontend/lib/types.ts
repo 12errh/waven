@@ -4,16 +4,35 @@ export type DockSection = 'home' | 'search' | 'library' | 'likes' | 'profile';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
+/** Kinds exposed by the Go `GetMix` binding and the Discover screen. */
+export type MixKind = 'recently_added' | 'recently_played' | 'on_repeat' | 'favorites';
+
 /**
- * Optional browser-preview accompaniment. Real library tracks always carry an
- * audio URL from the loopback media server, so the synth is only used by the
- * fixture library that keeps `npm run dev` usable outside the Wails shell.
+ * Resumable playback state persisted in SQLite under `player.session`. The
+ * queue and its stable shuffled order belong to the session so relaunching
+ * restores exactly what was playing.
  */
-export interface SynthProfile {
-  bpm: number;
-  rootHz: number;
-  chords: number[][];
-  padColor: 'warm' | 'bright' | 'nocturnal';
+export interface PlayerSession {
+  trackId: number;
+  positionMs: number;
+  queueIds: number[];
+  queueIndex: number;
+  shuffle: boolean;
+  shuffleOrder: number[];
+  repeat: RepeatMode;
+  volume: number;
+  muted: boolean;
+  updatedAt: number;
+}
+
+/** Live now-playing snapshot mirrored to the Go tray. Not persisted. */
+export interface PlayerState {
+  trackId: number;
+  title: string;
+  artist: string;
+  playing: boolean;
+  positionMs: number;
+  durationMs: number;
 }
 
 /**
@@ -45,7 +64,6 @@ export interface Track {
   liked: boolean;
   missing: boolean;
   addedAt: number;
-  synth?: SynthProfile;
 }
 
 export interface TrackQuery {

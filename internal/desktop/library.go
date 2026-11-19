@@ -600,6 +600,51 @@ func (s *LibraryService) Search(query string, limit int) (SearchResults, error) 
 	return SearchResults{Tracks: tracks, Albums: albums, Artists: artists}, nil
 }
 
+// GetMix returns one of the in-library mixes used by Discover. Kinds are
+// "recently_added", "recently_played", "on_repeat", and "favorites".
+func (s *LibraryService) GetMix(kind string, limit int) ([]Track, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	var rows []store.Track
+	switch kind {
+	case "recently_added":
+		page, err := s.store.ListTracks(store.TrackFilter{Sort: "added", Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		rows = page.Tracks
+	case "recently_played":
+		list, err := s.store.RecentlyPlayed(limit)
+		if err != nil {
+			return nil, err
+		}
+		rows = list
+	case "on_repeat":
+		list, err := s.store.OnRepeat(limit, 14, 3)
+		if err != nil {
+			return nil, err
+		}
+		rows = list
+	case "favorites":
+		page, err := s.store.ListTracks(store.TrackFilter{LikedOnly: true, Sort: "title", Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		rows = page.Tracks
+	default:
+		return nil, fmt.Errorf("unknown mix %q", kind)
+	}
+	tracks := make([]Track, 0, len(rows))
+	for _, row := range rows {
+		tracks = append(tracks, s.toTrack(row))
+	}
+	return tracks, nil
+}
+
 // GetStats returns library counters and artwork cache size.
 func (s *LibraryService) GetStats() (LibraryStats, error) {
 	st, err := s.store.Stats()

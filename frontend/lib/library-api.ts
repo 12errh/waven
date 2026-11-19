@@ -9,6 +9,7 @@ import type {
   Folder,
   Genre,
   LibraryStats,
+  MixKind,
   ScanProgress,
   ScanStatus,
   ScanSummary,
@@ -38,6 +39,7 @@ export interface LibraryApi {
   cancelScan(): Promise<void>;
   scanStatus(): Promise<ScanStatus>;
   getLikedIds(): Promise<number[]>;
+  getMix(kind: MixKind, limit: number): Promise<Track[]>;
   setLiked(id: number, liked: boolean): Promise<void>;
   getTrack(id: number): Promise<Track>;
   search(query: string, limit: number): Promise<SearchResults>;
@@ -62,6 +64,7 @@ function createDesktopApi(): LibraryApi {
     cancelScan: () => Bindings.CancelScan(),
     scanStatus: () => Bindings.ScanStatus(),
     getLikedIds: () => Bindings.GetLikedIDs(),
+    getMix: (kind, limit) => Bindings.GetMix(kind, limit),
     setLiked: (id, liked) => Bindings.SetLiked(id, liked),
     getTrack: (id) => Bindings.GetTrack(id),
     search: (query, limit) => Bindings.Search(query, limit),

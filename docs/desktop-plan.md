@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phase 1 complete; Phase 2 next
+**Status:** Phases 0–2 complete; Phase 3 next
 **Date:** 2026-11-19
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -719,20 +719,25 @@ work, and the window can be dragged, hidden, and restored from the tray. ✅
 **Done when:** a real music folder scans, the library renders correctly, artwork appears,
 and a second scan skips unchanged files.
 
-### Phase 2 — Playback (2–3 days)
+### Phase 2 — Playback (2–3 days) ✅
 
-- [ ] Loopback media server with token, Range, and MIME handling.
-- [ ] Replace the synth engine with the HTMLAudioElement/Web Audio engine.
-- [ ] Play, pause, seek, volume, next, previous, shuffle, repeat.
-- [ ] Queue management and end-of-queue behavior.
-- [ ] Session save/restore (paused on launch).
-- [ ] Keyboard shortcuts, including ←/→ seek.
-- [ ] Real progress and analyser-driven visualizer.
-- [ ] Unsupported-format handling.
-- [ ] Play recording for mixes.
+- [x] Loopback media server with token, Range, and MIME handling.
+- [x] Replace the synth engine with the HTMLAudioElement/Web Audio engine.
+- [x] Play, pause, seek, volume, next, previous, shuffle, repeat.
+- [x] Queue management and end-of-queue behavior.
+- [x] Session save/restore (paused on launch).
+- [x] Keyboard shortcuts, including ←/→ seek.
+- [x] Real progress and analyser-driven visualizer.
+- [x] Unsupported-format handling.
+- [x] Play recording for mixes.
 
 **Done when:** a 50MB FLAC seeks instantly, all repeat modes behave, and relaunching
 restores the queue and position.
+
+Verified by `internal/media/server_test.go` (mid-file Range on a 50 MB FLAC),
+`internal/desktop/player_test.go` (session round-trip, pruning, corrupt JSON,
+shutdown flush), and `frontend/lib/player-logic.test.ts` (stable shuffle, all
+repeat modes, end-of-queue, resume clamping, play thresholds).
 
 ### Phase 3 — Desktop behavior (1–2 days)
 

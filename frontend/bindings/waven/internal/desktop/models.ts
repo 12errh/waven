@@ -262,6 +262,120 @@ export class LibraryStats {
 }
 
 /**
+ * PlayerSession is the resumable playback state. The frontend owns the audio
+ * element; Go only stores the queue so a relaunch can restore it paused.
+ */
+export class PlayerSession {
+    "trackId": number;
+    "positionMs": number;
+    "queueIds": number[];
+    "queueIndex": number;
+    "shuffle": boolean;
+    "shuffleOrder": number[];
+    "repeat": string;
+    "volume": number;
+    "muted": boolean;
+    "updatedAt": number;
+
+    /** Creates a new PlayerSession instance. */
+    constructor($$source: Partial<PlayerSession> = {}) {
+        if (!("trackId" in $$source)) {
+            this["trackId"] = 0;
+        }
+        if (!("positionMs" in $$source)) {
+            this["positionMs"] = 0;
+        }
+        if (!("queueIds" in $$source)) {
+            this["queueIds"] = [];
+        }
+        if (!("queueIndex" in $$source)) {
+            this["queueIndex"] = 0;
+        }
+        if (!("shuffle" in $$source)) {
+            this["shuffle"] = false;
+        }
+        if (!("shuffleOrder" in $$source)) {
+            this["shuffleOrder"] = [];
+        }
+        if (!("repeat" in $$source)) {
+            this["repeat"] = "";
+        }
+        if (!("volume" in $$source)) {
+            this["volume"] = 0;
+        }
+        if (!("muted" in $$source)) {
+            this["muted"] = false;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlayerSession instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PlayerSession {
+        const $$createField2_0 = $$createType4;
+        const $$createField5_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("queueIds" in $$parsedSource) {
+            $$parsedSource["queueIds"] = $$createField2_0($$parsedSource["queueIds"]);
+        }
+        if ("shuffleOrder" in $$parsedSource) {
+            $$parsedSource["shuffleOrder"] = $$createField5_0($$parsedSource["shuffleOrder"]);
+        }
+        return new PlayerSession($$parsedSource as Partial<PlayerSession>);
+    }
+}
+
+/**
+ * PlayerState is the live now-playing snapshot used for tray labels. It is not
+ * persisted; the resumable state is PlayerSession.
+ */
+export class PlayerState {
+    "trackId": number;
+    "title": string;
+    "artist": string;
+    "playing": boolean;
+    "positionMs": number;
+    "durationMs": number;
+
+    /** Creates a new PlayerState instance. */
+    constructor($$source: Partial<PlayerState> = {}) {
+        if (!("trackId" in $$source)) {
+            this["trackId"] = 0;
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("artist" in $$source)) {
+            this["artist"] = "";
+        }
+        if (!("playing" in $$source)) {
+            this["playing"] = false;
+        }
+        if (!("positionMs" in $$source)) {
+            this["positionMs"] = 0;
+        }
+        if (!("durationMs" in $$source)) {
+            this["durationMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlayerState instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PlayerState {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PlayerState($$parsedSource as Partial<PlayerState>);
+    }
+}
+
+/**
  * ScanStatus lets a reloaded frontend re-attach to a running scan.
  */
 export class ScanStatus {
@@ -285,8 +399,8 @@ export class ScanStatus {
      * Creates a new ScanStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): ScanStatus {
-        const $$createField1_0 = $$createType4;
-        const $$createField2_0 = $$createType6;
+        const $$createField1_0 = $$createType5;
+        const $$createField2_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("progress" in $$parsedSource) {
             $$parsedSource["progress"] = $$createField1_0($$parsedSource["progress"]);
@@ -325,7 +439,7 @@ export class SearchResults {
      * Creates a new SearchResults instance from a string or object.
      */
     static createFrom($$source: any = {}): SearchResults {
-        const $$createField0_0 = $$createType8;
+        const $$createField0_0 = $$createType9;
         const $$createField1_0 = $$createType1;
         const $$createField2_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
@@ -478,7 +592,7 @@ export class TrackPage {
      * Creates a new TrackPage instance from a string or object.
      */
     static createFrom($$source: any = {}): TrackPage {
-        const $$createField0_0 = $$createType8;
+        const $$createField0_0 = $$createType9;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tracks" in $$parsedSource) {
             $$parsedSource["tracks"] = $$createField0_0($$parsedSource["tracks"]);
@@ -548,8 +662,9 @@ const $$createType0 = Album.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = Artist.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = library$0.Progress.createFrom;
-const $$createType5 = library$0.ScanSummary.createFrom;
-const $$createType6 = $Create.Nullable($$createType5);
-const $$createType7 = Track.createFrom;
-const $$createType8 = $Create.Array($$createType7);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = library$0.Progress.createFrom;
+const $$createType6 = library$0.ScanSummary.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
+const $$createType8 = Track.createFrom;
+const $$createType9 = $Create.Array($$createType8);

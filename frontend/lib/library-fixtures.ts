@@ -9,6 +9,7 @@ import type {
   Folder,
   Genre,
   LibraryStats,
+  MixKind,
   ScanProgress,
   ScanStatus,
   ScanSummary,
@@ -77,17 +78,6 @@ function fixtureTrack(
     liked: false,
     missing: false,
     addedAt: 0,
-    synth: {
-      bpm: 110 + (id % 5) * 4,
-      rootHz: 196,
-      chords: [
-        [220, 261.63, 329.63],
-        [174.61, 220, 261.63],
-        [196, 246.94, 293.66],
-        [146.83, 174.61, 220],
-      ],
-      padColor: id % 2 === 0 ? 'warm' : 'nocturnal',
-    },
   };
 }
 
@@ -396,6 +386,28 @@ export function createFixtureApi() {
     },
     async getLikedIds(): Promise<number[]> {
       return tracks.filter((track) => track.liked).map((track) => track.id);
+    },
+    async getMix(kind: MixKind, limit: number): Promise<Track[]> {
+      const cap = limit > 0 ? limit : 100;
+      // Preview play history is synthetic so Discover has representative
+      // content without a database. The desktop build uses real play rows.
+      let source: Track[];
+      switch (kind) {
+        case 'recently_played':
+          source = tracks.slice(0, 6);
+          break;
+        case 'on_repeat':
+          source = tracks.slice(2, 8);
+          break;
+        case 'favorites':
+          source = tracks.filter((track) => track.liked);
+          break;
+        case 'recently_added':
+        default:
+          source = sortTracks(tracks, 'added');
+          break;
+      }
+      return source.slice(0, cap).map((track) => ({ ...track }));
     },
     async getTrack(id: number): Promise<Track> {
       const track = tracks.find((entry) => entry.id === id);

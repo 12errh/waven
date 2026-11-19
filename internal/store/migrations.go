@@ -82,6 +82,10 @@ CREATE TABLE settings (
     value TEXT NOT NULL
 );
 `,
+	// 2: mix queries scan plays by time, not by track.
+	`
+CREATE INDEX idx_plays_started ON plays(started_at DESC);
+`,
 }
 
 func migrate(db *sql.DB) error {

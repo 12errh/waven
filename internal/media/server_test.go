@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"waven/internal/library"
 	"waven/internal/store"
@@ -143,6 +144,97 @@ func TestServerServesAudioWithRange(t *testing.T) {
 	headRes.Body.Close()
 	if headRes.StatusCode != http.StatusOK {
 		t.Fatalf("HEAD status = %d", headRes.StatusCode)
+	}
+}
+
+func TestServerServesLargeFLACRangeImmediately(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "large.flac")
+	const size = int64(50 * 1024 * 1024)
+	const offset = int64(25 * 1024 * 1024)
+	marker := []byte("WAVEN-RANGE-OK!!")
+
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(size); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt(marker, offset); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "waven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	folder, err := st.AddFolder(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := store.TrackRecord{
+		FolderID: folder.ID, Path: path, Title: "Large", Artist: "Artist",
+		Album: "Album", AlbumArtist: "Artist", Format: "flac",
+		SizeBytes: size, MTime: 1, SearchText: "large artist album", LastSeenScan: 1,
+	}
+	if err := st.UpsertTracks([]store.TrackRecord{record}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.ListTracks(store.TrackFilter{})
+	if err != nil || page.Total != 1 {
+		t.Fatalf("tracks = %+v, %v", page, err)
+	}
+
+	cache, err := library.NewArtworkCache(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(st, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	// A mid-file Range must return only the requested bytes, without reading
+	// the whole 50 MB file. The timeout is deliberately generous so the test
+	// proves bounded work rather than disk speed.
+	req, _ := http.NewRequest(http.MethodGet, srv.TrackURL(page.Tracks[0].ID), nil)
+	req.Header.Set("Range", "bytes=26214400-26214415")
+	started := time.Now()
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	elapsed := time.Since(started)
+	if res.StatusCode != http.StatusPartialContent {
+		t.Fatalf("range status = %d, want 206", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "audio/flac" {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if cr := res.Header.Get("Content-Range"); cr != "bytes 26214400-26214415/52428800" {
+		t.Fatalf("content-range = %q", cr)
+	}
+	if cl := res.Header.Get("Content-Length"); cl != "16" {
+		t.Fatalf("content-length = %q", cl)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(body, marker) {
+		t.Fatalf("range body = %q, want %q", body, marker)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("mid-file range took %s, want bounded work", elapsed)
 	}
 }
 

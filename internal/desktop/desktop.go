@@ -31,6 +31,9 @@ type Desktop struct {
 	window        *application.WebviewWindow
 	tray          *application.SystemTray
 	trayLock      sync.Mutex
+	trayTrack     *application.MenuItem
+	trayPlayPause *application.MenuItem
+	nowPlaying    PlayerState
 	quitting      atomic.Bool
 	trayAvailable atomic.Bool
 }
@@ -149,6 +152,22 @@ func (d *Desktop) createTray() {
 	tray.SetTooltip("WAVEN")
 
 	menu := d.app.NewMenu()
+	title := menu.Add("WAVEN")
+	title.SetEnabled(false)
+	d.trayTrack = menu.Add("Nothing playing")
+	d.trayTrack.SetEnabled(false)
+	menu.AddSeparator()
+	d.trayPlayPause = menu.Add("Play")
+	d.trayPlayPause.OnClick(func(*application.Context) {
+		d.app.Event.Emit("tray:playPause")
+	})
+	menu.Add("Previous").OnClick(func(*application.Context) {
+		d.app.Event.Emit("tray:prev")
+	})
+	menu.Add("Next").OnClick(func(*application.Context) {
+		d.app.Event.Emit("tray:next")
+	})
+	menu.AddSeparator()
 	menu.Add("Open WAVEN").OnClick(func(*application.Context) {
 		d.Show()
 	})
@@ -166,6 +185,42 @@ func (d *Desktop) createTray() {
 	})
 
 	d.tray = tray
+	d.applyNowPlayingLocked()
+}
+
+// SetNowPlaying updates the tray's track and transport labels. It is called by
+// the Player service whenever the frontend reports a track or play-state
+// change, including before the tray exists (the cached state is applied when
+// the tray is created later).
+func (d *Desktop) SetNowPlaying(state PlayerState) {
+	d.trayLock.Lock()
+	defer d.trayLock.Unlock()
+	d.nowPlaying = state
+	d.applyNowPlayingLocked()
+}
+
+// applyNowPlayingLocked expects trayLock to be held.
+func (d *Desktop) applyNowPlayingLocked() {
+	label := "Nothing playing"
+	if d.nowPlaying.Title != "" {
+		label = d.nowPlaying.Title
+		if d.nowPlaying.Artist != "" {
+			label += " — " + d.nowPlaying.Artist
+		}
+	}
+	if d.trayTrack != nil {
+		d.trayTrack.SetLabel(label)
+	}
+	if d.trayPlayPause != nil {
+		if d.nowPlaying.Playing {
+			d.trayPlayPause.SetLabel("Pause")
+		} else {
+			d.trayPlayPause.SetLabel("Play")
+		}
+	}
+	if d.tray != nil {
+		d.tray.SetTooltip("WAVEN\n" + label)
+	}
 }
 
 // Show restores and focuses the main window.

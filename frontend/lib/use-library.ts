@@ -8,6 +8,7 @@ import type {
   Folder,
   Genre,
   LibraryStats,
+  MixKind,
   ScanProgress,
   ScanSummary,
   SearchResults,
@@ -62,6 +63,7 @@ export interface LibraryController {
   loadAlbums: (limit?: number, offset?: number) => Promise<AlbumPage>;
   loadArtists: (limit?: number, offset?: number) => Promise<ArtistPage>;
   loadGenres: () => Promise<Genre[]>;
+  loadMix: (kind: MixKind, limit?: number) => Promise<Track[]>;
   search: (query: string) => Promise<SearchResults>;
   resolveTrack: (id: number | null | undefined) => Track | undefined;
   getTrack: (id: number) => Promise<Track | undefined>;
@@ -274,6 +276,16 @@ export function useLibrary(): LibraryController {
     return api.getGenres();
   }, [api]);
 
+  const loadMix = useCallback(
+    async (kind: MixKind, limit = 100): Promise<Track[]> => {
+      if (!api) return [];
+      const mix = await api.getMix(kind, limit);
+      upsertTracks(mix);
+      return mix;
+    },
+    [api, upsertTracks]
+  );
+
   const search = useCallback(
     async (query: string): Promise<SearchResults> => {
       if (!api) return { tracks: [], albums: [], artists: [] };
@@ -473,6 +485,7 @@ export function useLibrary(): LibraryController {
       loadAlbums,
       loadArtists,
       loadGenres,
+      loadMix,
       search,
       resolveTrack,
       getTrack,
@@ -501,6 +514,7 @@ export function useLibrary(): LibraryController {
       loadAlbums,
       loadArtists,
       loadGenres,
+      loadMix,
       search,
       resolveTrack,
       getTrack,
