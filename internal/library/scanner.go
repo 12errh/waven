@@ -32,6 +32,12 @@ var supportedExtensions = map[string]string{
 	".ogg":  "ogg",
 	".oga":  "ogg",
 	".opus": "opus",
+	// Music videos and audio-only streams from video containers are indexed
+	// for their audio track. The player never renders the video.
+	".mp4":  "mp4",
+	".m4v":  "m4v",
+	".webm": "webm",
+	".mkv":  "mkv",
 }
 
 var junkDirectories = map[string]bool{
@@ -269,6 +275,9 @@ func (s *Scanner) collect(ctx context.Context, folder store.Folder) ([]candidate
 		if strings.HasPrefix(name, ".") {
 			return nil
 		}
+		if isTemporaryDownload(name) {
+			return nil
+		}
 		ext := strings.ToLower(filepath.Ext(name))
 		if _, ok := supportedExtensions[ext]; !ok {
 			return nil
@@ -296,6 +305,19 @@ func shouldSkipDir(name string) bool {
 		return true
 	}
 	return junkDirectories[strings.ToLower(name)]
+}
+
+// isTemporaryDownload skips partially downloaded files. Downloaders usually
+// rename the extension only after the transfer completes, so a leftover
+// "Song.temp.webm" or "Song.part.mp4" has no complete media payload.
+func isTemporaryDownload(name string) bool {
+	lower := strings.ToLower(name)
+	for _, marker := range []string{".part.", ".temp.", ".ytdl.", ".download."} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scanner) parseAll(ctx context.Context, files []candidate, states map[string]store.FileState, scanTime int64) <-chan parseResult {

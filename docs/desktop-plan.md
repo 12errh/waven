@@ -27,7 +27,7 @@ underneath it — not a redesign.
 | Default window look | Glass + ambient cover tint, with Solid fallback |
 | Mini player | Included in v1 |
 | Discover screen | In-library mixes (Recently Added, Recently Played, On Repeat, Favorites) |
-| Formats | MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, Opus |
+| Formats | MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, Opus; audio from MP4/M4V/WebM/MKV containers |
 | ALAC | Not in v1 |
 | Library scale | Designed for up to ~50k tracks |
 | Playback owner | Frontend (`<audio>` + Web Audio); Go owns files, metadata, OS integration |
@@ -255,8 +255,10 @@ CREATE TABLE settings (
 - Symlinks are not traversed; this avoids loops and paths outside the selected root.
 - Hidden/system directories and known junk (`node_modules`, `#recycle`, `@eaDir`) are
   skipped.
-- Extension allowlist: `.mp3 .m4a .aac .flac .wav .aiff .aif .ogg .oga .opus`.
-  `.mp4` is excluded so video files are not imported.
+- Extension allowlist: `.mp3 .m4a .aac .flac .wav .aiff .aif .ogg .oga .opus`,
+  plus audio-bearing video containers `.mp4 .m4v .webm .mkv` (indexed for their audio
+  track, never rendered as video). Partially downloaded files (`.part.`, `.temp.`,
+  `.ytdl.`, `.download.`) are skipped.
 
 **Scan pipeline**
 
@@ -270,7 +272,8 @@ CREATE TABLE settings (
 
 **Metadata**
 
-- `dhowden/tag` for ID3v1/v2, MP4, FLAC, and Ogg.
+- `dhowden/tag` for ID3v1/v2, MP4, FLAC, and Ogg. Matroska/WebM tags are not read; those
+  files use the filename fallback.
 - Filename fallback: `Artist - Title`, `NN - Title`, or the bare filename.
 - Album artist falls back to artist; disc number defaults to 1.
 
@@ -282,7 +285,9 @@ Container-header parsing, no full decode:
 - WAV: `fmt ` + `data` chunk sizes.
 - AIFF: `COMM` chunk.
 - MP3: first valid frame header plus Xing/Info frame count; fallback to size/bitrate.
-- M4A: `mvhd` duration.
+- M4A/MP4/M4V: `mvhd` duration.
+- WebM/MKV: Matroska `Info` (`TimecodeScale` + `Duration`), including unknown-sized
+  segments written by streaming tools.
 - OGG/Opus: last page granule position.
 
 If a parser fails, duration is 0. The frontend reports the real duration from
@@ -320,12 +325,14 @@ If a parser fails, duration is 0. The frontend reports the real duration from
 - Audio served with `http.ServeContent`, giving Range, HEAD, and conditional requests.
 - MIME map:
   - `mp3` → `audio/mpeg`
-  - `m4a` → `audio/mp4`
+  - `m4a/mp4/m4v` → `audio/mp4`
   - `aac` → `audio/aac`
   - `flac` → `audio/flac`
   - `wav` → `audio/wav`
   - `aiff/aif` → `audio/aiff`
   - `ogg/oga/opus` → `audio/ogg`
+  - `webm` → `audio/webm`
+  - `mkv` → `audio/x-matroska`
 - `Access-Control-Allow-Origin: *` so `MediaElementAudioSourceNode` can analyse the
   stream. The unguessable token is the access control; the server never binds to a public
   interface.

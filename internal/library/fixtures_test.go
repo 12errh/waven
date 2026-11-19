@@ -3,6 +3,7 @@ package library
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"os"
 	"testing"
 )
@@ -146,6 +147,41 @@ func writeM4A(t *testing.T, path string, seconds int) {
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write m4a: %v", err)
 	}
+}
+
+// writeWebM writes a minimal Matroska/WebM file whose Info block reports the
+// requested duration. The layout mirrors audio-only WebM files from yt-dlp.
+func writeWebM(t *testing.T, path string, seconds int) {
+	t.Helper()
+	var info bytes.Buffer
+	// TimecodeScale: 1,000,000 ns (one millisecond per tick).
+	info.Write([]byte{0x2A, 0xD7, 0xB1, 0x83, 0x0F, 0x42, 0x40})
+	// Duration: float64 measured in timecode ticks.
+	info.Write([]byte{0x44, 0x89, 0x88})
+	var duration [8]byte
+	binary.BigEndian.PutUint64(duration[:], math.Float64bits(float64(seconds)*1000))
+	info.Write(duration[:])
+
+	segment := ebmlElement([]byte{0x18, 0x53, 0x80, 0x67},
+		ebmlElement([]byte{0x15, 0x49, 0xA9, 0x66}, info.Bytes()))
+	var buf bytes.Buffer
+	buf.Write(ebmlElement([]byte{0x1A, 0x45, 0xDF, 0xA3}, nil))
+	buf.Write(segment)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write webm: %v", err)
+	}
+}
+
+func ebmlElement(id, body []byte) []byte {
+	out := make([]byte, 0, len(id)+2+len(body))
+	out = append(out, id...)
+	if len(body) < 0x7f {
+		out = append(out, byte(0x80|len(body)))
+	} else {
+		out = append(out, byte(0x40|(len(body)>>8)), byte(len(body)))
+	}
+	out = append(out, body...)
+	return out
 }
 
 // writeMP3WithID3v2 prepends a small ID3v2.3 tag (title, artist, album and an

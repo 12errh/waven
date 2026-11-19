@@ -220,6 +220,24 @@ func TestServerRejectsBadRequests(t *testing.T) {
 	_ = audioPath
 }
 
+func TestAudioMIME(t *testing.T) {
+	tests := map[string]string{
+		".mp3":  "audio/mpeg",
+		".m4a":  "audio/mp4",
+		".mp4":  "audio/mp4",
+		".m4v":  "audio/mp4",
+		".webm": "audio/webm",
+		".mkv":  "audio/x-matroska",
+		".opus": "audio/ogg",
+		".txt":  "",
+	}
+	for ext, want := range tests {
+		if got := audioMIME(ext); got != want {
+			t.Errorf("audioMIME(%q) = %q, want %q", ext, got, want)
+		}
+	}
+}
+
 func tokenOf(t *testing.T, rawURL string) string {
 	t.Helper()
 	parts := strings.Split(rawURL, "/")

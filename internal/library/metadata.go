@@ -90,6 +90,9 @@ func metadataFromFilename(path string) Metadata {
 	base := filepath.Base(path)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	base = strings.TrimSpace(stripBOM(base))
+	// yt-dlp sometimes leaves the chosen format ID as a second extension
+	// ("Song.f251.webm"). It is not part of the title.
+	base = dropFormatIDSuffix(base)
 
 	meta := Metadata{Title: base, DiscNo: 1}
 	if idx := strings.Index(base, " - "); idx > 0 {
@@ -112,6 +115,25 @@ func metadataFromFilename(path string) Metadata {
 		}
 	}
 	return meta
+}
+
+// dropFormatIDSuffix removes a trailing yt-dlp format selector such as
+// ".f251" so the filename fallback does not leak it into the title.
+func dropFormatIDSuffix(base string) string {
+	dot := strings.LastIndexByte(base, '.')
+	if dot <= 0 || dot == len(base)-1 {
+		return base
+	}
+	suffix := base[dot+1:]
+	if len(suffix) < 2 || len(suffix) > 4 || suffix[0] != 'f' {
+		return base
+	}
+	for _, r := range suffix[1:] {
+		if r < '0' || r > '9' {
+			return base
+		}
+	}
+	return strings.TrimSpace(base[:dot])
 }
 
 func numericPrefix(s string) (int, bool) {

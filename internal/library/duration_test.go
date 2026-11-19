@@ -1,6 +1,7 @@
 package library
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -20,6 +21,10 @@ func TestDurationParsers(t *testing.T) {
 		{"flac", "sample.flac", writeFLAC, 3, 3000, 5},
 		{"aiff", "sample.aiff", writeAIFF, 4, 4000, 5},
 		{"m4a", "sample.m4a", writeM4A, 5, 5000, 1},
+		{"mp4", "sample.mp4", writeM4A, 5, 5000, 1},
+		{"m4v", "sample.m4v", writeM4A, 5, 5000, 1},
+		{"webm", "sample.webm", writeWebM, 6, 6000, 1},
+		{"mkv", "sample.mkv", writeWebM, 7, 7000, 1},
 		{"opus", "sample.opus", writeOpusOgg, 6, 6000, 1},
 	}
 
@@ -53,6 +58,27 @@ func TestADTSDuration(t *testing.T) {
 	const want = int64(200 * 1024 * 1000 / 44100)
 	if got := DurationMs(path); got != want {
 		t.Fatalf("DurationMs(aac) = %d, want %d", got, want)
+	}
+}
+
+func TestMatroskaDurationUnknownSegmentSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stream.webm")
+	writeWebM(t, path, 9)
+
+	// Streamed WebM leaves the segment size as the one-byte unknown value.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 10 {
+		t.Fatalf("fixture too short: %d bytes", len(data))
+	}
+	data[9] = 0xff
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := DurationMs(path); got != 9000 {
+		t.Fatalf("DurationMs(webm, unknown segment) = %d, want 9000", got)
 	}
 }
 

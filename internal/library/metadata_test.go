@@ -20,6 +20,7 @@ func TestMetadataFromFilename(t *testing.T) {
 		{"track and artist", "03 - Artist Name - Song Title.ogg", "Artist Name - Song Title", "", 3},
 		{"bare filename", "Untitled Demo.wav", "Untitled Demo", "", 0},
 		{"dotted name", "M83 - Outro (Live).m4a", "Outro (Live)", "M83", 0},
+		{"yt-dlp format suffix", "Kavinsky - Nightcall.f251.webm", "Nightcall", "Kavinsky", 0},
 	}
 
 	for _, tt := range tests {

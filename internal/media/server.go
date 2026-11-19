@@ -230,7 +230,7 @@ func audioMIME(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".mp3":
 		return "audio/mpeg"
-	case ".m4a":
+	case ".m4a", ".mp4", ".m4v":
 		return "audio/mp4"
 	case ".aac":
 		return "audio/aac"
@@ -242,6 +242,10 @@ func audioMIME(ext string) string {
 		return "audio/aiff"
 	case ".ogg", ".oga", ".opus":
 		return "audio/ogg"
+	case ".webm":
+		return "audio/webm"
+	case ".mkv":
+		return "audio/x-matroska"
 	default:
 		return ""
 	}

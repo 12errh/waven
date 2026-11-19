@@ -49,7 +49,9 @@ Add a music folder from **Library → Add folder**. The native picker registers 
 starts a scan, and the home screen switches from fixtures to real data once the first scan
 finishes.
 
-- Supported formats: MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, and Opus. ALAC is not supported.
+- Supported formats: MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, and Opus. MP4, M4V, WebM, and
+  MKV files are indexed for their audio track (music videos play as audio). ALAC is not
+  supported.
 - Tags are read with `dhowden/tag`; missing title/artist fall back to the filename. Durations
   are parsed from container headers, and the webview's reported duration fills any gap.
 - Embedded artwork is resized to 512 px on its long edge, stored as a content-addressed JPEG,

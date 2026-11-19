@@ -28,6 +28,7 @@ func TestScannerIncrementalScan(t *testing.T) {
 	writeWAV(t, filepath.Join(root, "Daft Punk - Aerodynamic.wav"), 1)
 	writeWAV(t, filepath.Join(root, "02 - Nightcall.wav"), 2)
 	writeWAV(t, filepath.Join(root, "Bare.wav"), 1)
+	writeWebM(t, filepath.Join(root, "partial.temp.webm"), 1)
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("not audio"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +143,44 @@ func TestScannerIncrementalScan(t *testing.T) {
 	// The artwork cache must not be touched by a scan with no embedded art.
 	if entries, err := os.ReadDir(cache.Dir()); err != nil || len(entries) != 0 {
 		t.Fatalf("artwork entries = %d, %v", len(entries), err)
+	}
+}
+
+func TestScannerIndexesVideoContainers(t *testing.T) {
+	root := t.TempDir()
+	writeM4A(t, filepath.Join(root, "Aaron Smith - Dancin.mp4"), 4)
+	writeWebM(t, filepath.Join(root, "Kavinsky - Nightcall.webm"), 5)
+	writeWebM(t, filepath.Join(root, "01 - First.mkv"), 6)
+
+	scanner, st, _ := newTestScanner(t)
+	folder, err := st.AddFolder(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := scanner.Scan(context.Background(), folder)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if summary.Added != 3 || summary.Skipped != 0 {
+		t.Fatalf("scan summary = %+v", summary)
+	}
+
+	page, err := st.ListTracks(store.TrackFilter{Sort: "title"})
+	if err != nil || page.Total != 3 {
+		t.Fatalf("tracks = %+v, %v", page, err)
+	}
+	byTitle := map[string]store.Track{}
+	for _, track := range page.Tracks {
+		byTitle[track.Title] = track
+	}
+	if got := byTitle["Dancin"]; got.Format != "mp4" || got.Artist != "Aaron Smith" || got.DurationMs != 4000 {
+		t.Fatalf("mp4 track = %+v", got)
+	}
+	if got := byTitle["Nightcall"]; got.Format != "webm" || got.Artist != "Kavinsky" || got.DurationMs != 5000 {
+		t.Fatalf("webm track = %+v", got)
+	}
+	if got := byTitle["First"]; got.Format != "mkv" || got.TrackNo != 1 || got.DurationMs != 6000 {
+		t.Fatalf("mkv track = %+v", got)
 	}
 }
 

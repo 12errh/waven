@@ -31,8 +31,10 @@ func DurationMs(path string) int64 {
 		ms = aiffDuration(f)
 	case ".mp3":
 		ms = mp3Duration(f)
-	case ".m4a":
+	case ".m4a", ".mp4", ".m4v":
 		ms = m4aDuration(f)
+	case ".webm", ".mkv":
+		ms = matroskaDuration(f)
 	case ".ogg", ".oga", ".opus":
 		ms = oggDuration(f)
 	case ".aac":
@@ -476,6 +478,200 @@ func findBox(f *os.File, start, end int64, path ...string) ([]byte, error) {
 		offset += size
 	}
 	return nil, errors.New("box not found")
+}
+
+// Matroska/WebM element IDs used for duration extraction.
+const (
+	ebmlHeaderID        = 0x1A45DFA3
+	ebmlSegmentID       = 0x18538067
+	ebmlInfoID          = 0x1549A966
+	ebmlClusterID       = 0x1F43B675
+	ebmlTimecodeScaleID = 0x2AD7B1
+	ebmlDurationID      = 0x4489
+)
+
+// matroskaDuration reads Duration and TimecodeScale from the segment Info
+// block. Tools that stream WebM often leave the segment size unknown, so the
+// parser walks element headers by absolute offset instead of loading the file.
+func matroskaDuration(f *os.File) int64 {
+	stat, err := f.Stat()
+	if err != nil || stat.Size() < 4 {
+		return 0
+	}
+	fileSize := stat.Size()
+
+	id, _, end, unknown, ok := ebmlElementAt(f, 0, fileSize)
+	if !ok || id != ebmlHeaderID || unknown {
+		return 0
+	}
+	for offset := end; offset < fileSize; {
+		id, body, bodyEnd, unknown, ok := ebmlElementAt(f, offset, fileSize)
+		if !ok {
+			return 0
+		}
+		if id == ebmlSegmentID {
+			return matroskaSegmentDuration(f, body, bodyEnd)
+		}
+		if unknown {
+			return 0
+		}
+		offset = bodyEnd
+	}
+	return 0
+}
+
+func matroskaSegmentDuration(f *os.File, start, end int64) int64 {
+	for offset := start; offset < end; {
+		id, body, bodyEnd, unknown, ok := ebmlElementAt(f, offset, end)
+		if !ok {
+			return 0
+		}
+		switch id {
+		case ebmlInfoID:
+			if unknown {
+				return 0
+			}
+			return matroskaInfoDuration(f, body, bodyEnd)
+		case ebmlClusterID:
+			// Info always precedes the first cluster. If it does not, stop
+			// rather than walking the media payload.
+			return 0
+		}
+		if unknown {
+			return 0
+		}
+		offset = bodyEnd
+	}
+	return 0
+}
+
+func matroskaInfoDuration(f *os.File, start, end int64) int64 {
+	scale := int64(1_000_000) // Matroska default: one millisecond per tick.
+	var duration float64
+	for offset := start; offset < end; {
+		id, body, bodyEnd, unknown, ok := ebmlElementAt(f, offset, end)
+		if !ok || unknown {
+			return 0
+		}
+		switch id {
+		case ebmlTimecodeScaleID:
+			if v, ok := ebmlUintAt(f, body, bodyEnd); ok && v > 0 && v <= math.MaxInt64 {
+				scale = int64(v)
+			}
+		case ebmlDurationID:
+			size := bodyEnd - body
+			if size == 4 || size == 8 {
+				buf := make([]byte, size)
+				if _, err := f.ReadAt(buf, body); err == nil || errors.Is(err, io.EOF) {
+					if size == 4 {
+						duration = float64(math.Float32frombits(binary.BigEndian.Uint32(buf)))
+					} else {
+						duration = math.Float64frombits(binary.BigEndian.Uint64(buf))
+					}
+				}
+			}
+		}
+		offset = bodyEnd
+	}
+	if duration <= 0 || scale <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+		return 0
+	}
+	ms := duration * float64(scale) / 1e6
+	if ms > math.MaxInt64 {
+		return 0
+	}
+	return int64(ms)
+}
+
+// ebmlElementAt reads an EBML element header. bodyEnd is the first byte after
+// the payload; unknown-sized elements extend to the container limit.
+func ebmlElementAt(r io.ReaderAt, offset, limit int64) (id uint32, bodyStart, bodyEnd int64, unknown, ok bool) {
+	if offset < 0 || offset >= limit {
+		return 0, 0, 0, false, false
+	}
+	header := make([]byte, 12)
+	n, err := r.ReadAt(header, offset)
+	if n == 0 || (err != nil && !errors.Is(err, io.EOF)) {
+		return 0, 0, 0, false, false
+	}
+	header = header[:n]
+
+	id, idLen, ok := readEBMLID(header)
+	if !ok {
+		return 0, 0, 0, false, false
+	}
+	size, sizeLen, unknown, ok := readEBMLSize(header[idLen:])
+	if !ok {
+		return 0, 0, 0, false, false
+	}
+	bodyStart = offset + int64(idLen+sizeLen)
+	if unknown {
+		return id, bodyStart, limit, true, true
+	}
+	bodyEnd = bodyStart + size
+	if bodyEnd < bodyStart || bodyEnd > limit {
+		return 0, 0, 0, false, false
+	}
+	return id, bodyStart, bodyEnd, false, true
+}
+
+func readEBMLID(b []byte) (uint32, int, bool) {
+	if len(b) == 0 {
+		return 0, 0, false
+	}
+	length := 1
+	for mask := byte(0x80); mask != 0 && b[0]&mask == 0; mask >>= 1 {
+		length++
+	}
+	if length > 4 || len(b) < length {
+		return 0, 0, false
+	}
+	var id uint32
+	for i := 0; i < length; i++ {
+		id = id<<8 | uint32(b[i])
+	}
+	return id, length, true
+}
+
+func readEBMLSize(b []byte) (int64, int, bool, bool) {
+	if len(b) == 0 {
+		return 0, 0, false, false
+	}
+	length := 1
+	for mask := byte(0x80); mask != 0 && b[0]&mask == 0; mask >>= 1 {
+		length++
+	}
+	if length > 8 || len(b) < length {
+		return 0, 0, false, false
+	}
+	var value uint64
+	for i := 0; i < length; i++ {
+		value = value<<8 | uint64(b[i])
+	}
+	// Clear the length marker, leaving the seven value bits of the first
+	// octet and the following octets.
+	value &^= uint64(1) << (7 * length)
+	unknown := value == uint64(1)<<(7*length)-1
+	if value > math.MaxInt64 {
+		return 0, 0, false, false
+	}
+	return int64(value), length, unknown, true
+}
+
+func ebmlUintAt(r io.ReaderAt, start, end int64) (uint64, bool) {
+	size := end - start
+	if size <= 0 || size > 8 {
+		return 0, false
+	}
+	buf := make([]byte, size)
+	if _, err := r.ReadAt(buf, start); err != nil && !errors.Is(err, io.EOF) {
+		return 0, false
+	}
+	var value uint64
+	for _, b := range buf {
+		value = value<<8 | uint64(b)
+	}
+	return value, true
 }
 
 func oggDuration(f *os.File) int64 {
