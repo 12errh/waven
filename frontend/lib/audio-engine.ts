@@ -5,6 +5,8 @@ import type { SynthProfile, Track } from './types';
 export interface AudioCallbacks {
   onTimeUpdate: (currentTime: number, duration: number) => void;
   onEnded: () => void;
+  /** Fired when the browser reports a duration the library did not know. */
+  onMetadata?: (durationSec: number) => void;
   onError?: (message: string) => void;
 }
 
@@ -21,9 +23,9 @@ const DEFAULT_SYNTH: SynthProfile = {
 };
 
 /**
- * Dual-mode audio engine:
- * 1. Plays real HTML5 <audio> when a track has a playable audioUrl (iTunes preview or uploaded local MP3/WAV/M4A).
- * 2. Falls back cleanly to a pleasant polyphonic Web Audio ambient groove + deterministic clock when offline or preview-less.
+ * Plays real files from the loopback media server through an HTML5 <audio>
+ * element. Tracks without an audio URL (the browser-preview fixture) fall back
+ * to a quiet Web Audio pad so the interface still has motion and sound.
  */
 export class WavenAudioEngine {
   private audioEl: HTMLAudioElement | null = null;
@@ -54,30 +56,40 @@ export class WavenAudioEngine {
       this.audioEl.crossOrigin = 'anonymous';
 
       this.audioEl.addEventListener('timeupdate', () => {
-        if (this.mode === 'html5' && this.audioEl) {
-          const dur =
-            Number.isFinite(this.audioEl.duration) && this.audioEl.duration > 0
-              ? this.audioEl.duration
-              : this.durationSec;
-          this.elapsedSec = this.audioEl.currentTime;
+        if (this.mode !== 'html5' || !this.audioEl) return;
+        const dur =
+          Number.isFinite(this.audioEl.duration) && this.audioEl.duration > 0
+            ? this.audioEl.duration
+            : this.durationSec;
+        this.elapsedSec = this.audioEl.currentTime;
+        this.durationSec = dur;
+        this.callbacks.onTimeUpdate(this.elapsedSec, this.durationSec);
+      });
+
+      this.audioEl.addEventListener('loadedmetadata', () => {
+        if (this.mode !== 'html5' || !this.audioEl) return;
+        const dur = this.audioEl.duration;
+        if (Number.isFinite(dur) && dur > 0) {
           this.durationSec = dur;
+          this.callbacks.onMetadata?.(dur);
           this.callbacks.onTimeUpdate(this.elapsedSec, this.durationSec);
         }
       });
 
       this.audioEl.addEventListener('ended', () => {
-        if (this.mode === 'html5') {
-          this.isPlaying = false;
-          this.callbacks.onEnded();
-        }
+        if (this.mode !== 'html5') return;
+        this.isPlaying = false;
+        this.callbacks.onEnded();
       });
 
       this.audioEl.addEventListener('error', () => {
-        // Gracefully switch to synth clock if remote stream is unreachable
-        if (this.mode === 'html5' && this.isPlaying) {
-          this.mode = 'synth';
-          this.startSynthLoop();
-        }
+        if (this.mode !== 'html5') return;
+        this.isPlaying = false;
+        this.callbacks.onError?.(
+          this.currentTrack?.audioUrl
+            ? `Could not play "${this.currentTrack.title}". The file may have moved or use a codec this system does not support.`
+            : 'Could not play this track.'
+        );
       });
     }
   }
@@ -104,18 +116,25 @@ export class WavenAudioEngine {
     this.stopSynthLoop();
     this.currentTrack = track;
     this.elapsedSec = Math.max(0, startAtSec);
-    this.durationSec = track.durationSec || 192;
+    this.durationSec = track.durationSec > 0 ? track.durationSec : 192;
 
     if (this.audioEl) {
       this.audioEl.pause();
       if (track.audioUrl) {
         this.mode = 'html5';
         this.audioEl.src = track.audioUrl;
-        this.audioEl.currentTime = startAtSec;
         this.audioEl.volume = this.muted ? 0 : this.volume;
+        if (startAtSec > 0) {
+          try {
+            this.audioEl.currentTime = startAtSec;
+          } catch {
+            // The seek applies once metadata is available.
+          }
+        }
       } else {
         this.mode = 'synth';
         this.audioEl.removeAttribute('src');
+        this.audioEl.load();
       }
     } else {
       this.mode = 'synth';
@@ -124,7 +143,7 @@ export class WavenAudioEngine {
     this.callbacks.onTimeUpdate(this.elapsedSec, this.durationSec);
 
     if (autoPlay) {
-      this.play();
+      void this.play();
     } else {
       this.isPlaying = false;
     }
@@ -139,9 +158,17 @@ export class WavenAudioEngine {
         this.audioEl.volume = this.muted ? 0 : this.volume;
         await this.audioEl.play();
         return;
-      } catch {
-        // Fallback to synth engine if browser or network blocks stream
-        this.mode = 'synth';
+      } catch (error) {
+        this.isPlaying = false;
+        const name = (error as DOMException)?.name;
+        if (name === 'NotAllowedError') {
+          this.callbacks.onError?.('Playback needs a click to start. Press play to continue.');
+        } else if (name !== 'AbortError') {
+          this.callbacks.onError?.(
+            'Could not play this track. The file may have moved or use a codec this system does not support.'
+          );
+        }
+        return;
       }
     }
 
@@ -163,7 +190,7 @@ export class WavenAudioEngine {
       try {
         this.audioEl.currentTime = clamped;
       } catch {
-        // ignore if metadata not yet loaded
+        // ignore until metadata is available
       }
     }
     this.callbacks.onTimeUpdate(this.elapsedSec, this.durationSec);
@@ -212,10 +239,9 @@ export class WavenAudioEngine {
 
       this.callbacks.onTimeUpdate(this.elapsedSec, this.durationSec);
 
-      // Schedule gentle warm ambient chords using Web Audio API
       if (ctx && this.masterGain && !this.muted && this.volume > 0.01) {
         const profile = this.currentTrack?.synth ?? DEFAULT_SYNTH;
-        const stepDur = 60 / profile.bpm / 2; // eighth-note step
+        const stepDur = 60 / profile.bpm / 2;
         while (this.nextStepTime < ctx.currentTime + 0.15) {
           this.triggerSynthStep(ctx, this.masterGain, profile, this.stepCount, this.nextStepTime);
           this.nextStepTime += stepDur;
@@ -236,7 +262,6 @@ export class WavenAudioEngine {
     const chordIdx = Math.floor(step / 8) % profile.chords.length;
     const chord = profile.chords[chordIdx] ?? DEFAULT_SYNTH.chords[0];
 
-    // Warm pad chord on beat 0 of every bar
     if (barStep === 0) {
       for (const freq of chord) {
         const osc = ctx.createOscillator();
@@ -259,7 +284,6 @@ export class WavenAudioEngine {
       }
     }
 
-    // Subtle arpeggio pluck on steps 0, 2, 4, 6
     if (barStep % 2 === 0) {
       const noteFreq = chord[(barStep / 2) % chord.length] * 2;
       const osc = ctx.createOscillator();
@@ -285,6 +309,11 @@ export class WavenAudioEngine {
 
   public destroy() {
     this.pause();
+    if (this.audioEl) {
+      this.audioEl.removeAttribute('src');
+      this.audioEl.load();
+      this.audioEl = null;
+    }
     if (this.audioCtx) {
       this.audioCtx.close().catch(() => {});
       this.audioCtx = null;

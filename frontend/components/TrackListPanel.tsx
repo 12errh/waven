@@ -9,14 +9,14 @@ import { CoverImage } from './CoverImage';
 
 interface TrackListPanelProps {
   tracks: Track[];
-  currentTrackId: string;
+  currentTrackId: number | null;
   isPlaying: boolean;
-  likedIds: Set<string>;
+  likedIds: Set<number>;
   playlists: Playlist[];
   onPlayTrack: (track: Track) => void;
-  onToggleLike: (trackId: string) => void;
+  onToggleLike: (trackId: number) => void;
   onAddToQueue: (track: Track) => void;
-  onAddToPlaylist: (playlistId: string, trackId: string) => void;
+  onAddToPlaylist: (playlistId: string, trackId: number) => void;
   emptyMessage?: string;
 }
 
@@ -32,7 +32,7 @@ export function TrackListPanel({
   onAddToPlaylist,
   emptyMessage = 'No tracks available.',
 }: TrackListPanelProps) {
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   return (
     <section

@@ -21,7 +21,7 @@ export function LeftDock({ activeSection, onSelectSection, likedCount }: LeftDoc
   }> = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'search', label: 'Search music', icon: Search },
-    { id: 'library', label: 'Music library and uploads', icon: Music2 },
+    { id: 'library', label: 'Music library and folders', icon: Music2 },
     { id: 'likes', label: `Liked songs (${likedCount})`, icon: Heart },
   ];
 

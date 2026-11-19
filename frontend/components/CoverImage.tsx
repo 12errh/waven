@@ -12,12 +12,20 @@ interface CoverImageProps {
 }
 
 export function CoverImage({ src, alt, className, fallbackSrc }: CoverImageProps) {
-  const [failed, setFailed] = useState(false);
-  const [usedFallback, setUsedFallback] = useState(false);
+  // Track failures by URL rather than with a boolean so a component reused for
+  // a new track starts from a clean slate without a state-resetting effect.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [failedFallbackSrc, setFailedFallbackSrc] = useState<string | null>(null);
 
-  const activeSrc = failed && fallbackSrc && !usedFallback ? fallbackSrc : src;
+  const primaryFailed = src !== '' && failedSrc === src;
+  const fallbackFailed = fallbackSrc !== undefined && failedFallbackSrc === fallbackSrc;
+  const activeSrc = primaryFailed
+    ? !fallbackSrc || fallbackFailed
+      ? ''
+      : fallbackSrc
+    : src;
 
-  if (failed && (!fallbackSrc || usedFallback)) {
+  if (activeSrc === '') {
     return (
       <div
         className={cn(
@@ -39,11 +47,10 @@ export function CoverImage({ src, alt, className, fallbackSrc }: CoverImageProps
       referrerPolicy="no-referrer"
       className={className}
       onError={() => {
-        if (!failed && fallbackSrc) {
-          setFailed(true);
+        if (activeSrc === fallbackSrc) {
+          setFailedFallbackSrc(activeSrc);
         } else {
-          setUsedFallback(true);
-          setFailed(true);
+          setFailedSrc(activeSrc);
         }
       }}
     />

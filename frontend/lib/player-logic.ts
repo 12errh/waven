@@ -23,31 +23,75 @@ export function formatTrackRowDuration(seconds: number): string {
 }
 
 /**
- * Formats large integer likes counts cleanly (e.g. 2800000 -> "2.8M likes").
+ * Formats a library duration in hours and minutes for the profile summary.
  */
-export function formatLikesCount(count: number): string {
-  if (!Number.isFinite(count) || count <= 0) return '0 likes';
-  if (count >= 1_000_000) {
-    const val = (count / 1_000_000).toFixed(1).replace(/\.0$/, '');
-    return `${val}M likes`;
+export function formatLibraryDuration(totalMs: number): string {
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return '0 min';
+  const minutes = Math.round(totalMs / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
+}
+
+/**
+ * Formats the technical metadata of a local file for compact display, e.g.
+ * "FLAC · 44.1 kHz · 900 kbps". Unknown values are skipped.
+ */
+export function formatTrackQuality(track: {
+  format: string;
+  sampleRate: number;
+  bitrateKbps: number;
+  channels: number;
+}): string {
+  const parts: string[] = [];
+  if (track.format) parts.push(track.format.toUpperCase());
+  if (track.sampleRate > 0) {
+    parts.push(`${(track.sampleRate / 1000).toFixed(track.sampleRate % 1000 === 0 ? 0 : 1)} kHz`);
   }
-  if (count >= 1_000) {
-    const val = (count / 1_000).toFixed(1).replace(/\.0$/, '');
-    return `${val}K likes`;
-  }
-  return `${count} likes`;
+  if (track.bitrateKbps > 0) parts.push(`${Math.round(track.bitrateKbps)} kbps`);
+  if (track.channels === 1) parts.push('mono');
+  return parts.join(' · ');
+}
+
+/**
+ * Formats a byte count for the library cache summary.
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * Formats a unix-millisecond timestamp as a short relative label.
+ */
+export function formatRelativeTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 'never';
+  const deltaMs = Date.now() - timestamp;
+  if (deltaMs < 60_000) return 'just now';
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return new Date(timestamp).toLocaleDateString();
 }
 
 /**
  * Computes the next track ID given the current queue, active ID, shuffle, and repeat settings.
+ * Returns null when a non-looping queue reaches its end.
  */
 export function getNextTrackId(params: {
-  queueIds: string[];
-  currentTrackId: string;
+  queueIds: number[];
+  currentTrackId: number;
   shuffle: boolean;
   repeat: RepeatMode;
   randomFn?: () => number;
-}): string | null {
+}): number | null {
   const { queueIds, currentTrackId, shuffle, repeat, randomFn = Math.random } = params;
   if (queueIds.length === 0) return null;
   if (repeat === 'one') return currentTrackId;
@@ -62,8 +106,7 @@ export function getNextTrackId(params: {
 
   if (currentIdx === -1) return queueIds[0];
   if (currentIdx < queueIds.length - 1) return queueIds[currentIdx + 1];
-
-  return repeat === 'all' ? queueIds[0] : queueIds[0];
+  return repeat === 'all' ? queueIds[0] : null;
 }
 
 /**
@@ -71,9 +114,9 @@ export function getNextTrackId(params: {
  * If elapsed > 3 seconds, callers restart current track; otherwise step back.
  */
 export function getPrevTrackId(params: {
-  queueIds: string[];
-  currentTrackId: string;
-}): string | null {
+  queueIds: number[];
+  currentTrackId: number;
+}): number | null {
   const { queueIds, currentTrackId } = params;
   if (queueIds.length === 0) return null;
   const currentIdx = queueIds.indexOf(currentTrackId);
@@ -159,7 +202,7 @@ export function groupTracksByAlbum(tracks: Track[]): Array<{
 export function addTrackToPlaylist(
   playlists: Playlist[],
   playlistId: string,
-  trackId: string
+  trackId: number
 ): Playlist[] {
   return playlists.map((pl) => {
     if (pl.id !== playlistId) return pl;
@@ -174,7 +217,7 @@ export function addTrackToPlaylist(
 export function removeTrackFromPlaylist(
   playlists: Playlist[],
   playlistId: string,
-  trackId: string
+  trackId: number
 ): Playlist[] {
   return playlists.map((pl) => {
     if (pl.id !== playlistId) return pl;

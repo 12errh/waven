@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import {
+  Disc3,
   Heart,
   ListMusic,
   MoreHorizontal,
@@ -16,12 +17,12 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { computeSeekTime, formatLikesCount, formatTimeMMSS } from '@/lib/player-logic';
+import { computeSeekTime, formatTimeMMSS, formatTrackQuality } from '@/lib/player-logic';
 import type { Playlist, RepeatMode, Track } from '@/lib/types';
 import { CoverImage } from './CoverImage';
 
 interface NowPlayingCardProps {
-  track: Track;
+  track: Track | null;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -36,13 +37,14 @@ interface NowPlayingCardProps {
   onPrev: () => void;
   onNext: () => void;
   onSeek: (sec: number) => void;
-  onToggleLike: (trackId: string) => void;
+  onToggleLike: (trackId: number) => void;
   onToggleShuffle: () => void;
   onCycleRepeat: () => void;
   onVolumeChange: (vol: number) => void;
   onToggleMute: () => void;
-  onAddToPlaylist: (playlistId: string, trackId: string) => void;
+  onAddToPlaylist: (playlistId: string, trackId: number) => void;
   onOpenQueue: () => void;
+  onOpenLibrary: () => void;
 }
 
 export function NowPlayingCard({
@@ -68,11 +70,39 @@ export function NowPlayingCard({
   onToggleMute,
   onAddToPlaylist,
   onOpenQueue,
+  onOpenLibrary,
 }: NowPlayingCardProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
 
+  if (!track) {
+    return (
+      <aside
+        aria-label="Now playing"
+        className="relative w-full min-h-[440px] lg:h-full lg:min-h-[540px] rounded-[28px] overflow-hidden notched-hero-mask shadow-[0_24px_65px_rgba(0,0,0,0.6)] border border-white/[0.12] flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-slate-800 via-zinc-900 to-black p-8 text-center"
+      >
+        <div className="w-24 h-24 rounded-3xl bg-white/[0.06] border border-white/10 flex items-center justify-center">
+          <Disc3 className="w-10 h-10 text-white/35" />
+        </div>
+        <div className="space-y-1.5 max-w-[260px]">
+          <h2 className="font-display text-lg font-semibold text-white">Nothing playing yet</h2>
+          <p className="text-sm text-white/55 leading-relaxed">
+            Add a music folder and WAVEN will scan your files, artwork, and tags.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenLibrary}
+          className="px-5 py-2.5 rounded-full bg-white text-[#090b10] text-xs font-semibold hover:bg-white/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          Add music folder
+        </button>
+      </aside>
+    );
+  }
+
   const safeDuration = duration > 0 ? duration : track.durationSec;
   const progressPct = safeDuration > 0 ? Math.min(100, (currentTime / safeDuration) * 100) : 0;
+  const quality = formatTrackQuality(track);
 
   const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -193,8 +223,8 @@ export function NowPlayingCard({
 
       {/* Bottom Now Playing Metadata + Scrubber + Transport Controls */}
       <div className="relative z-10 px-5 sm:px-6 pb-6 pt-16">
-        <span className="inline-block px-3 py-0.5 rounded-full bg-white/15 backdrop-blur-md border border-white/15 text-[10px] font-medium text-white/90">
-          {track.badgeLabel || 'New release'}
+        <span className="inline-block max-w-full truncate px-3 py-0.5 rounded-full bg-white/15 backdrop-blur-md border border-white/15 text-[10px] font-medium text-white/90">
+          {track.genre || 'Local file'}
         </span>
 
         <h2 className="font-display text-2xl sm:text-[30px] font-bold uppercase tracking-wide text-white leading-tight mt-2.5 truncate">
@@ -203,9 +233,11 @@ export function NowPlayingCard({
 
         <div className="flex items-center justify-between gap-3 mt-1">
           <p className="text-xs sm:text-sm text-white/80 truncate">{track.artist}</p>
-          <span className="flex items-center gap-1.5 text-[11px] font-mono-tabular text-white/80 shrink-0">
-            <Heart className={cn('w-3.5 h-3.5', isLiked && 'fill-white')} />
-            {formatLikesCount(track.likesCount)}
+          <span
+            className="text-[10px] font-mono-tabular text-white/65 shrink-0 truncate max-w-[45%] text-right"
+            title={quality}
+          >
+            {quality}
           </span>
         </div>
 

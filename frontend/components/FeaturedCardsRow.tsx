@@ -7,11 +7,11 @@ import { CoverImage } from './CoverImage';
 
 interface FeaturedCardsRowProps {
   tracks: Track[];
-  currentTrackId: string;
+  currentTrackId: number | null;
   isPlaying: boolean;
-  likedIds: Set<string>;
+  likedIds: Set<number>;
   onPlayTrack: (track: Track) => void;
-  onToggleLike: (trackId: string) => void;
+  onToggleLike: (trackId: number) => void;
 }
 
 export function FeaturedCardsRow({
@@ -64,7 +64,7 @@ export function FeaturedCardsRow({
               {/* Top Row: Release Tag & Heart Button */}
               <div className="relative z-20 flex items-center justify-between px-3.5 pt-3.5 pointer-events-none">
                 <span className="px-2.5 py-0.5 rounded-full bg-white/15 backdrop-blur-md border border-white/15 text-[10px] font-medium text-white/90 whitespace-nowrap">
-                  {track.badgeLabel || 'New release'}
+                  {track.genre || (track.format ? track.format.toUpperCase() : 'Local file')}
                 </span>
 
                 <button
@@ -90,7 +90,9 @@ export function FeaturedCardsRow({
                   </h3>
                   <p className="text-[11px] text-white/80 truncate">{track.artist}</p>
                   <p className="text-[10px] text-white/55 truncate mt-1">
-                    {track.releaseMeta || `Single · ${track.year}`}
+                    {[track.year > 0 ? String(track.year) : '', track.format.toUpperCase()]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </p>
                 </div>
 

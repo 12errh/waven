@@ -36,6 +36,12 @@ func main() {
 
 	app := application.New(options)
 
+	libraryService, err := desktop.NewLibraryService(app)
+	if err != nil {
+		log.Fatal(err)
+	}
+	app.RegisterService(application.NewService(libraryService))
+
 	shell := desktop.New(app)
 	shell.Start()
 

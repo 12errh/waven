@@ -3,8 +3,9 @@
 A local-first desktop music player. The interface is a Next.js app embedded in a Go/Wails
 shell, so the app ships as a single native binary with full filesystem access.
 
-> Phase 0 (desktop shell and build loop) is complete. The library scanner and playback
-> engine are the next milestones; see [`docs/desktop-plan.md`](docs/desktop-plan.md).
+> Phase 0 (desktop shell) and Phase 1 (library core) are complete. Local playback is wired
+> through the loopback media server; Phase 2 covers queue/session polish. See
+> [`docs/desktop-plan.md`](docs/desktop-plan.md).
 
 ## Requirements
 
@@ -41,6 +42,28 @@ wails3 task build      # builds frontend/out, then embeds it into bin/waven
 
 The production binary uses the `production` build tag, which embeds `frontend/out` and
 disables Wails' debug logging. It does not need the source tree at runtime.
+
+## Library
+
+Add a music folder from **Library → Add folder**. The native picker registers the root,
+starts a scan, and the home screen switches from fixtures to real data once the first scan
+finishes.
+
+- Supported formats: MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, and Opus. ALAC is not supported.
+- Tags are read with `dhowden/tag`; missing title/artist fall back to the filename. Durations
+  are parsed from container headers, and the webview's reported duration fills any gap.
+- Embedded artwork is resized to 512 px on its long edge, stored as a content-addressed JPEG,
+  and sampled for the accent color used by the UI.
+- Scans are incremental: unchanged files are skipped by size and mtime, missing files are
+  hidden only after a scan completes, and cancelling leaves the previous scan's state intact.
+- Search, filters, albums, artists, genres, likes, and stats all run against SQLite. Playback
+  streams through a per-launch token on `127.0.0.1` so `<audio>` can seek with Range requests.
+
+Data lives in the platform config and cache directories by default:
+
+- Database: `<config>/waven/waven.db`
+- Artwork cache: `<cache>/waven/artwork`
+- Overrides: `WAVEN_DATA_DIR` and `WAVEN_CACHE_DIR` (both are useful for a throwaway library).
 
 ## Layout
 

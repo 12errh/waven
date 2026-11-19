@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phase 0 complete; Phase 1 next
+**Status:** Phase 1 complete; Phase 2 next
 **Date:** 2026-11-19
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -699,15 +699,15 @@ work, and the window can be dragged, hidden, and restored from the tray. ✅
 
 ### Phase 1 — Library core (2–4 days)
 
-- [ ] SQLite store and migrations.
-- [ ] Folder picker and root management.
-- [ ] Scanner with incremental logic, worker pool, progress events.
-- [ ] Tag parsing and filename fallback.
-- [ ] Duration parsers.
-- [ ] Artwork extraction, resize, cache, accent color.
-- [ ] Bindings for library queries and search.
-- [ ] Wire Songs, Albums, Artists, Genres to real data.
-- [ ] Scanning and empty states.
+- [x] SQLite store and migrations.
+- [x] Folder picker and root management.
+- [x] Scanner with incremental logic, worker pool, progress events.
+- [x] Tag parsing and filename fallback.
+- [x] Duration parsers.
+- [x] Artwork extraction, resize, cache, accent color.
+- [x] Bindings for library queries and search.
+- [x] Wire Songs, Albums, Artists, Genres to real data.
+- [x] Scanning and empty states.
 
 **Done when:** a real music folder scans, the library renders correctly, artwork appears,
 and a second scan skips unchanged files.

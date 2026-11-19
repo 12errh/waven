@@ -5,7 +5,7 @@ import {
   computeSeekTime,
   filterTracksByGenre,
   filterTracksByQuery,
-  formatLikesCount,
+  formatLibraryDuration,
   formatTimeMMSS,
   formatTrackRowDuration,
   getNextTrackId,
@@ -16,85 +16,87 @@ import {
 } from './player-logic';
 import type { Playlist, Track } from './types';
 
-const sampleTracks: Track[] = [
-  {
-    id: 't1',
-    title: 'Flowers',
-    artist: 'Miley Cyrus',
-    album: 'Endless Summer Vacation',
-    genre: 'Pop',
+function track(id: number, title: string, artist: string, album: string, genre: string): Track {
+  return {
+    id,
+    title,
+    artist,
+    album,
+    albumArtist: artist,
+    genre,
     year: 2024,
+    trackNo: 1,
+    discNo: 1,
+    durationMs: 192000,
     durationSec: 192,
-    coverSrc: '/a.jpg',
-    likesCount: 2_800_000,
-  },
-  {
-    id: 't2',
-    title: 'Lunch',
-    artist: 'Billie Eilish',
-    album: 'HIT ME HARD AND SOFT',
-    genre: 'Alt-Pop',
-    year: 2024,
-    durationSec: 180,
-    coverSrc: '/b.jpg',
-    likesCount: 1_450_000,
-  },
-  {
-    id: 't3',
-    title: 'Sports Car',
-    artist: 'Tate McRae',
-    album: 'So Close To What',
-    genre: 'Dance-Pop',
-    year: 2025,
-    durationSec: 210,
-    coverSrc: '/c.jpg',
-    likesCount: 950,
-  },
+    bitrateKbps: 320,
+    sampleRate: 44100,
+    channels: 2,
+    format: 'mp3',
+    sizeBytes: 1,
+    artId: '',
+    coverSrc: '',
+    accentHex: '',
+    audioUrl: '',
+    liked: false,
+    missing: false,
+    addedAt: 0,
+  };
+}
+
+const sampleTracks: Track[] = [
+  track(1, 'Flowers', 'Miley Cyrus', 'Endless Summer Vacation', 'Pop'),
+  track(2, 'Lunch', 'Billie Eilish', 'HIT ME HARD AND SOFT', 'Alt-Pop'),
+  track(3, 'Sports Car', 'Tate McRae', 'So Close To What', 'Dance-Pop'),
 ];
 
-test('time and likes formatting produce exact expected strings', () => {
+test('time and library duration formatting produce exact expected strings', () => {
   assert.equal(formatTimeMMSS(43), '00:43');
   assert.equal(formatTimeMMSS(192), '03:12');
   assert.equal(formatTimeMMSS(-5), '00:00');
   assert.equal(formatTrackRowDuration(210), '3:30');
-  assert.equal(formatLikesCount(2_800_000), '2.8M likes');
-  assert.equal(formatLikesCount(12_400), '12.4K likes');
-  assert.equal(formatLikesCount(950), '950 likes');
+  assert.equal(formatLibraryDuration(45 * 60_000), '45 min');
+  assert.equal(formatLibraryDuration(3 * 3600_000 + 20 * 60_000), '3 hr 20 min');
+  assert.equal(formatLibraryDuration(2 * 3600_000), '2 hr');
 });
 
-test('getNextTrackId handles sequential, repeat-one, wrap-around, and shuffle', () => {
-  const queueIds = ['t1', 't2', 't3'];
+test('getNextTrackId handles sequential, repeat-one, wrap-around, shuffle, and stop', () => {
+  const queueIds = [1, 2, 3];
   assert.equal(
-    getNextTrackId({ queueIds, currentTrackId: 't1', shuffle: false, repeat: 'off' }),
-    't2'
+    getNextTrackId({ queueIds, currentTrackId: 1, shuffle: false, repeat: 'off' }),
+    2
   );
   assert.equal(
-    getNextTrackId({ queueIds, currentTrackId: 't3', shuffle: false, repeat: 'all' }),
-    't1'
+    getNextTrackId({ queueIds, currentTrackId: 3, shuffle: false, repeat: 'all' }),
+    1
   );
   assert.equal(
-    getNextTrackId({ queueIds, currentTrackId: 't2', shuffle: false, repeat: 'one' }),
-    't2'
+    getNextTrackId({ queueIds, currentTrackId: 3, shuffle: false, repeat: 'off' }),
+    null
+  );
+  assert.equal(
+    getNextTrackId({ queueIds, currentTrackId: 2, shuffle: false, repeat: 'one' }),
+    2
   );
   const shuffled = getNextTrackId({
     queueIds,
-    currentTrackId: 't1',
+    currentTrackId: 1,
     shuffle: true,
     repeat: 'off',
     randomFn: () => 0.9,
   });
-  assert.equal(shuffled, 't3');
+  assert.equal(shuffled, 3);
 });
 
 test('getPrevTrackId wraps around cleanly', () => {
-  const queueIds = ['t1', 't2', 't3'];
-  assert.equal(getPrevTrackId({ queueIds, currentTrackId: 't2' }), 't1');
-  assert.equal(getPrevTrackId({ queueIds, currentTrackId: 't1' }), 't3');
+  const queueIds = [1, 2, 3];
+  assert.equal(getPrevTrackId({ queueIds, currentTrackId: 2 }), 1);
+  assert.equal(getPrevTrackId({ queueIds, currentTrackId: 1 }), 3);
 });
 
 test('search and genre filters match accurately', () => {
   assert.equal(filterTracksByQuery(sampleTracks, 'billie').length, 1);
-  assert.equal(filterTracksByQuery(sampleTracks, 'endless')[0].id, 't1');
+  assert.equal(filterTracksByQuery(sampleTracks, 'endless')[0].id, 1);
   assert.equal(filterTracksByGenre(sampleTracks, 'Pop').length, 1);
   assert.equal(filterTracksByGenre(sampleTracks, 'All').length, 3);
 });
@@ -106,14 +108,15 @@ test('grouping helpers aggregate artists and albums', () => {
 
 test('playlist add and remove avoid duplicates and preserve immutability', () => {
   const initial: Playlist[] = [
-    { id: 'p1', name: 'Late Night', description: '', trackIds: ['t1'], coverSrc: '/a.jpg', createdAt: 1 },
+    { id: 'p1', name: 'Late Night', description: '', trackIds: [1], coverSrc: '/a.jpg', createdAt: 1 },
   ];
-  const added = addTrackToPlaylist(initial, 'p1', 't2');
-  assert.deepEqual(added[0].trackIds, ['t1', 't2']);
-  const deduped = addTrackToPlaylist(added, 'p1', 't2');
-  assert.deepEqual(deduped[0].trackIds, ['t1', 't2']);
-  const removed = removeTrackFromPlaylist(deduped, 'p1', 't1');
-  assert.deepEqual(removed[0].trackIds, ['t2']);
+  const added = addTrackToPlaylist(initial, 'p1', 2);
+  assert.deepEqual(added[0].trackIds, [1, 2]);
+  const deduped = addTrackToPlaylist(added, 'p1', 2);
+  assert.deepEqual(deduped[0].trackIds, [1, 2]);
+  const removed = removeTrackFromPlaylist(deduped, 'p1', 1);
+  assert.deepEqual(removed[0].trackIds, [2]);
+  assert.deepEqual(initial[0].trackIds, [1]);
 });
 
 test('computeSeekTime clamps ratios between 0 and 1', () => {
