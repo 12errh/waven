@@ -1152,7 +1152,7 @@ export function WavenPlayer() {
       data-file-drop-target="waven-library"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="waven-app relative min-h-screen w-full flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-x-hidden"
+      className="waven-app relative h-dvh max-h-dvh w-full flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-hidden"
     >
       {/* Drop affordance. The Wails runtime toggles .file-drop-target-active on
           this element while files hover the window. */}
@@ -1188,7 +1188,7 @@ export function WavenPlayer() {
       </div>
 
       {/* Centered Spatial Glassmorphic Shell + Floating Left Dock */}
-      <div className="relative z-10 w-full max-w-[1180px] min-w-0 flex items-center gap-4 lg:gap-6">
+      <div className="relative z-10 w-full max-w-[1180px] min-w-0 h-full min-h-0 flex items-center gap-4 lg:gap-6">
         <LeftDock
           activeSection={dockSection}
           onSelectSection={(section) => {
@@ -1203,10 +1203,10 @@ export function WavenPlayer() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="relative flex-1 min-w-0 w-full rounded-[28px] sm:rounded-[34px] bg-white/[0.045] backdrop-blur-3xl border border-white/[0.12] shadow-[0_32px_90px_rgba(0,0,0,0.75)] p-4 sm:p-7 lg:p-8 lg:pt-9"
+          className="relative flex-1 min-w-0 w-full h-full max-h-full min-h-0 flex flex-col rounded-[28px] sm:rounded-[34px] bg-white/[0.045] backdrop-blur-3xl border border-white/[0.12] shadow-[0_32px_90px_rgba(0,0,0,0.75)] p-4 sm:p-7 lg:p-8 lg:pt-9"
         >
           {/* Floating Centered Top Pill Navigation */}
-          <div className="flex justify-center mb-4 lg:mb-0 lg:absolute lg:-top-6 lg:left-1/2 lg:-translate-x-1/2 z-30 max-w-full">
+          <div className="flex shrink-0 justify-center mb-4 lg:mb-0 lg:absolute lg:-top-6 lg:left-1/2 lg:-translate-x-1/2 z-30 max-w-full">
             <TopPillNav
               activeTab={topTab}
               onSelectTab={(tab) => {
@@ -1217,7 +1217,7 @@ export function WavenPlayer() {
           </div>
 
           {/* Top-left WAVEN Brand Wordmark + desktop window controls */}
-          <header className="wails-drag -mx-1 mb-4 flex select-none items-center justify-between px-1 lg:mb-5">
+          <header className="wails-drag -mx-1 mb-4 flex shrink-0 select-none items-center justify-between px-1 lg:mb-5">
             <button
               type="button"
               onClick={() => {
@@ -1242,8 +1242,9 @@ export function WavenPlayer() {
             />
           </header>
 
-          {/* 2-Column Content Area */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-stretch">
+          {/* 2-Column Content Area — scrolls inside the fixed shell so the
+              window itself never grows past the viewport. */}
+          <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-stretch overflow-y-auto overscroll-contain waven-scroll pr-1 -mr-1">
             {/* Left Workspace Column */}
             <div className="lg:col-span-7 min-w-0 flex flex-col gap-5">
               {dockSection === 'home' && topTab === 'Discover' ? (
