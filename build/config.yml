@@ -1,0 +1,49 @@
+# This file drives `wails3 dev`. It intentionally avoids the generated
+# Taskfile-based build so the development loop stays small and predictable.
+version: '3'
+
+info:
+  companyName: "WAVEN"
+  productName: "WAVEN"
+  productIdentifier: "app.waven.desktop"
+  description: "A spatial music player for your local library."
+  copyright: "© 2026 WAVEN"
+  comments: "Local-first desktop music player."
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 500
+  ignore:
+    dir:
+      - .git
+      - .aistudio
+      - bin
+      - build
+      - docs
+      - frontend
+      - node_modules
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  # The dev port is literal here on purpose: `cmd` runs through a shell, but the
+  # readiness check does not expand environment variables. Keep this number in
+  # sync with DEV_PORT in Taskfile.yml when changing it.
+  executes:
+    - cmd: mkdir -p bin && go build -buildvcs=false -gcflags=all="-l" -o bin/waven-dev .
+      type: blocking
+    - cmd: npm --prefix frontend run dev -- --port 9245 --hostname 127.0.0.1
+      type: background
+      readiness:
+        tcp: "127.0.0.1:9245"
+        timeout: 90s
+        interval: 250ms
+    - cmd: ./bin/waven-dev
+      type: primary
+      exit_policy: shutdown

@@ -8,9 +8,14 @@ coverage/
 !.env.example
 
 # Desktop build output
+bin/
 frontend/out/
 build/bin/
 dist/
 *.exe
 *.app
+*.dylib
+*.so
+*.test
+.DS_Store
 

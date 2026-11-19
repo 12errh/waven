@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { motion } from 'motion/react';
 import {
   DISCOVER_TRACKLIST_IDS,
@@ -10,6 +17,7 @@ import {
 } from '@/lib/catalog-data';
 import { CATALOG_IMAGES } from '@/lib/catalog-images';
 import { WavenAudioEngine } from '@/lib/audio-engine';
+import { loadDesktopRuntime } from '@/lib/desktop-runtime';
 import {
   addTrackToPlaylist,
   filterTracksByQuery,
@@ -18,7 +26,14 @@ import {
   removeTrackFromPlaylist,
 } from '@/lib/player-logic';
 import type { DockSection, Playlist, RepeatMode, TopTab, Track } from '@/lib/types';
+import {
+  DEFAULT_WINDOW_MODE,
+  getWindowModeSnapshot,
+  setWindowMode as setWindowModePreference,
+  subscribeWindowMode,
+} from '@/lib/window-mode';
 import { FeaturedCardsRow } from './FeaturedCardsRow';
+import { DesktopControls } from './DesktopControls';
 import { LeftDock } from './LeftDock';
 import { NowPlayingCard } from './NowPlayingCard';
 import { SecondaryViews } from './SecondaryViews';
@@ -53,6 +68,11 @@ export function WavenPlayer() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Track[]>(INITIAL_TRACKS);
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
+  const windowMode = useSyncExternalStore(
+    subscribeWindowMode,
+    getWindowModeSnapshot,
+    () => DEFAULT_WINDOW_MODE
+  );
 
   const engineRef = useRef<WavenAudioEngine | null>(null);
 
@@ -92,6 +112,18 @@ export function WavenPlayer() {
       // ignore
     }
   }, [playlists]);
+
+  // Mirror the appearance on the root element so the CSS layers can react.
+  useEffect(() => {
+    document.documentElement.dataset.windowMode = windowMode;
+  }, [windowMode]);
+
+  // Bring up the Wails runtime as soon as the interface mounts. This announces
+  // the page to the Go shell, which enables the native drag region and lets the
+  // shell drive window controls and desktop diagnostics.
+  useEffect(() => {
+    void loadDesktopRuntime();
+  }, []);
 
   const currentTrack = useMemo(
     () => tracks.find((t) => t.id === currentTrackId) ?? tracks[0],
@@ -424,9 +456,15 @@ export function WavenPlayer() {
   const isCurrentLiked = likedIds.has(currentTrack.id);
 
   return (
-    <div className="relative min-h-screen w-full bg-[#07080c] flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-x-hidden">
+    <div
+      data-window-mode={windowMode}
+      className="waven-app relative min-h-screen w-full flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-x-hidden"
+    >
       {/* Ambient Atmospheric Backdrop mirroring current cover */}
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      <div
+        aria-hidden="true"
+        className="waven-ambient pointer-events-none fixed inset-0 z-0 overflow-hidden"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={currentTrack.coverSrc}
@@ -466,18 +504,19 @@ export function WavenPlayer() {
             />
           </div>
 
-          {/* Top-left WAVEN Brand Wordmark */}
-          <header className="flex items-center justify-between mb-4 lg:mb-5">
+          {/* Top-left WAVEN Brand Wordmark + desktop window controls */}
+          <header className="wails-drag -mx-1 mb-4 flex select-none items-center justify-between px-1 lg:mb-5">
             <button
               type="button"
               onClick={() => {
                 setDockSection('home');
                 setTopTab('Discover');
               }}
-              className="font-display text-xl sm:text-[22px] font-extrabold tracking-[0.08em] text-white uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-md"
+              className="wails-no-drag font-display text-xl sm:text-[22px] font-extrabold tracking-[0.08em] text-white uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-md"
             >
               WAVEN
             </button>
+            <DesktopControls mode={windowMode} onModeChange={setWindowModePreference} />
           </header>
 
           {/* 2-Column Content Area */}

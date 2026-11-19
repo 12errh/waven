@@ -46,7 +46,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
     >
       <body
         suppressHydrationWarning
-        className="bg-[#07080b] text-white antialiased selection:bg-white/20 selection:text-white overflow-x-hidden"
+        className="bg-transparent text-white antialiased selection:bg-white/20 selection:text-white overflow-x-hidden"
       >
         {children}
       </body>

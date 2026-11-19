@@ -1,0 +1,45 @@
+version: '3'
+
+# Keep DEV_PORT in sync with the literal port inside build/config.yml: the
+# `wails3 dev` readiness check does not expand environment variables.
+vars:
+  APP_NAME: waven
+  DEV_PORT: '9245'
+
+tasks:
+  dev:
+    summary: Run WAVEN with Next.js HMR and Go hot restart
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.DEV_PORT}}
+
+  build:frontend:
+    summary: Export the Next.js frontend to frontend/out
+    dir: frontend
+    cmds:
+      - npm run build
+
+  build:
+    summary: Build the production desktop binary
+    deps:
+      - task: build:frontend
+    cmds:
+      - mkdir -p bin
+      - go build -tags production -trimpath -buildvcs=false -ldflags="-s -w" -o bin/waven .
+
+  build:dev:
+    summary: Build a development binary that serves the exported frontend from disk
+    cmds:
+      - mkdir -p bin
+      - go build -buildvcs=false -gcflags=all="-l" -o bin/waven-dev .
+
+  run:
+    summary: Build and launch the production binary
+    deps:
+      - task: build
+    cmds:
+      - ./bin/waven
+
+  clean:
+    summary: Remove local build output
+    cmds:
+      - rm -rf bin frontend/out frontend/.next

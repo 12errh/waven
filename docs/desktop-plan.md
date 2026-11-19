@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Proposed — awaiting approval
+**Status:** Phase 0 complete; Phase 1 next
 **Date:** 2026-11-19
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -49,13 +49,14 @@ Verified on the development machine:
 
 - Go 1.27.3
 - Node 26.13.1 / npm 12.2.2
-- GTK 3.24 and WebKitGTK 4.1 present
-- `wails3` CLI not installed yet
-- Linux (CachyOS); Windows and macOS builds require CI or those machines
-- No git repository exists
+- GTK 3.24/4 and WebKitGTK 4.1 present
+- `wails3` v3.1.0 installed (`~/go/bin/wails3`)
+- Linux (CachyOS, Wayland); Windows and macOS builds require CI or those machines
+- Git initialized with the pre-restructure baseline commit `4d00665`
 
-The first implementation step is to initialize git and take a baseline commit **before**
-moving any files. The current app is not under version control, so this is mandatory.
+Phase 0 was validated on both a GNOME Wayland session (no StatusNotifier host) and a
+Hyprland session with a tray host. Without a host the tray is not created and close quits;
+with a host, close hides and a tray click restores the window.
 
 ---
 
@@ -675,17 +676,26 @@ Minimum targets (defaults, adjustable):
 
 ### Phase 0 — Shell and build loop (0.5–1 day)
 
-- [ ] `git init`, baseline commit, update `.gitignore`.
-- [ ] Move the Next app into `frontend/`; reinstall dependencies.
-- [ ] Install `wails3` (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`).
-- [ ] Scaffold `main.go`, `go.mod`, `Taskfile.yml`.
-- [ ] Configure Next static export and embed `frontend/out`.
-- [ ] Frameless window with Glass/Solid modes and a drag strip.
-- [ ] Tray skeleton and close-to-hide behavior.
-- [ ] Dev loop: Wails + Next HMR; production build; Linux launch.
+- [x] `git init`, baseline commit, update `.gitignore`.
+- [x] Move the Next app into `frontend/`; reinstall dependencies.
+- [x] Install `wails3` (`go install github.com/wailsapp/wails/v3/cmd/wails3@latest`).
+- [x] Scaffold `main.go`, `go.mod`, `Taskfile.yml`.
+- [x] Configure Next static export and embed `frontend/out`.
+- [x] Frameless window with Glass/Solid modes and a drag strip.
+- [x] Tray skeleton and close-to-hide behavior.
+- [x] Dev loop: Wails + Next HMR; production build; Linux launch.
+
+Implementation notes:
+
+- The dev port is literal (`9245`) in `build/config.yml` because `wails3 dev` does not expand
+  environment variables in its readiness check; `Taskfile.yml` must stay in sync.
+- The tray is created lazily when a StatusNotifier host is present. Wails already watches for
+  host appearance, so a tray created after launch registers without a restart.
+- Verified with `WAVEN_SMOKE=1`: the page hydrates, `wails:drag` reaches Go, minimize loses
+  focus, close-to-tray hides, and a D-Bus tray activation restores the window.
 
 **Done when:** the existing UI opens in a real Wails window, both dev and production builds
-work, and the window can be dragged, hidden, and restored from the tray.
+work, and the window can be dragged, hidden, and restored from the tray. ✅
 
 ### Phase 1 — Library core (2–4 days)
 
