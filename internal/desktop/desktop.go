@@ -186,12 +186,15 @@ func (d *Desktop) Hide() {
 	d.window.Hide()
 }
 
-// Toggle hides a visible window or restores a hidden or minimised one.
+// Toggle hides a focused window or restores a hidden, minimised, or unfocused
+// one. Focus is the reliable signal here: GTK/Wayland does not always report
+// GDK_TOPLEVEL_STATE_MINIMIZED, so IsMinimised alone would hide an already
+// minimised window when the tray icon is clicked.
 func (d *Desktop) Toggle() {
 	if d.window == nil {
 		return
 	}
-	if d.window.IsVisible() && !d.window.IsMinimised() {
+	if d.window.IsVisible() && d.window.IsFocused() {
 		d.Hide()
 		return
 	}
@@ -283,6 +286,22 @@ func (d *Desktop) smokeTest() {
 	})()`)
 	time.Sleep(500 * time.Millisecond)
 
+	// Verify that the appearance control updates the DOM and persists the
+	// choice. The probe appears in the dev log alongside the other smoke data.
+	log.Printf("smoke: switching to the solid appearance")
+	d.window.ExecJS(`document.querySelector('[aria-label="Solid background fallback"]')?.click()`)
+	time.Sleep(400 * time.Millisecond)
+	d.window.ExecJS(`(() => {
+		const app = document.querySelector('.waven-app');
+		const mode = app?.dataset.windowMode ?? 'missing';
+		const stored = localStorage.getItem('waven_window_mode_v1') ?? 'missing';
+		fetch('/waven-probe?mode=' + encodeURIComponent(mode) + '&stored=' + encodeURIComponent(stored));
+	})()`)
+	time.Sleep(500 * time.Millisecond)
+	log.Printf("smoke: restoring the glass appearance")
+	d.window.ExecJS(`document.querySelector('[aria-label="Glass with ambient tint from the current cover"]')?.click()`)
+	time.Sleep(300 * time.Millisecond)
+
 	log.Printf("smoke: clicking the minimise control")
 	d.window.ExecJS(`document.querySelector('[aria-label="Minimise window"]')?.click()`)
 	time.Sleep(1500 * time.Millisecond)
@@ -316,6 +335,31 @@ func (d *Desktop) smokeTest() {
 	}
 	time.Sleep(1500 * time.Millisecond)
 	log.Printf("smoke: visible after tray activation: %v", d.window.IsVisible())
+
+	// A tray click must also restore a window the user minimised. The toggle
+	// uses focus rather than the unreliable Wayland minimise state, so wait for
+	// the compositor to report the focus change. When it ignores the minimise
+	// request, there is nothing to restore and the check is skipped.
+	log.Printf("smoke: minimising before the second tray activation")
+	d.window.ExecJS(`document.querySelector('[aria-label="Minimise window"]')?.click()`)
+	deadline := time.Now().Add(5 * time.Second)
+	for d.window.IsFocused() && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if d.window.IsFocused() {
+		log.Printf("smoke: window stayed focused after minimise; skipping the minimised tray check")
+		d.Quit()
+		return
+	}
+	log.Printf("smoke: before tray activation: visible=%v focused=%v", d.window.IsVisible(), d.window.IsFocused())
+
+	if err := activateTray(); err != nil {
+		log.Printf("smoke: tray activation failed: %v", err)
+	} else {
+		log.Printf("smoke: tray activation issued")
+	}
+	time.Sleep(1500 * time.Millisecond)
+	log.Printf("smoke: after tray activation: visible=%v focused=%v", d.window.IsVisible(), d.window.IsFocused())
 	d.Quit()
 }
 

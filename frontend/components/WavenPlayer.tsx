@@ -113,11 +113,6 @@ export function WavenPlayer() {
     }
   }, [playlists]);
 
-  // Mirror the appearance on the root element so the CSS layers can react.
-  useEffect(() => {
-    document.documentElement.dataset.windowMode = windowMode;
-  }, [windowMode]);
-
   // Bring up the Wails runtime as soon as the interface mounts. This announces
   // the page to the Go shell, which enables the native drag region and lets the
   // shell drive window controls and desktop diagnostics.
