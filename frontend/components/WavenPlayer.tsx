@@ -146,6 +146,10 @@ export function WavenPlayer() {
   const recordedRef = useRef(false);
   const lastProgressPositionRef = useRef(0);
   const lastCheckpointPositionRef = useRef(0);
+  // A restored track is preloaded paused so its metadata can settle. WebKit can
+  // leave that preloaded element unable to start later; the first user play
+  // reloads it inside the gesture, which is the same reliable path Next uses.
+  const needsFreshLoadRef = useRef(false);
 
   const handleNextRef = useRef<(auto?: boolean) => void>(() => {});
   const handlePrevRef = useRef<() => void>(() => {});
@@ -399,6 +403,7 @@ export function WavenPlayer() {
       setCurrentTrackId(track.id);
       loadedTrackIdRef.current = track.id;
       resumeRef.current = null;
+      needsFreshLoadRef.current = false;
       currentTimeRef.current = start;
       setCurrentTime(start);
       durationRef.current = track.durationSec > 0 ? track.durationSec : 0;
@@ -441,6 +446,7 @@ export function WavenPlayer() {
     recordedRef.current = false;
     lastProgressPositionRef.current = start;
     lastCheckpointPositionRef.current = start;
+    needsFreshLoadRef.current = Boolean(currentTrack.audioUrl);
     applyPlaying(false);
     engineRef.current?.loadTrack(currentTrack, start, false);
     setPlaybackError(null);
@@ -586,6 +592,10 @@ export function WavenPlayer() {
           engineRef.current?.pause();
           applyPlaying(false);
           persistSession();
+        } else if (needsFreshLoadRef.current) {
+          // The restored element was preloaded paused. Recreate it now so the
+          // browser starts playback inside this user gesture.
+          startTrack(track, true, currentTimeRef.current);
         } else {
           setPlaybackError(null);
           applyPlaying(true);
@@ -612,6 +622,13 @@ export function WavenPlayer() {
     }
 
     if (loadedTrackIdRef.current !== track.id) {
+      startTrack(track, true, currentTimeRef.current);
+      return;
+    }
+
+    if (needsFreshLoadRef.current) {
+      // A restored track is preloaded paused. Recreate the element inside this
+      // gesture; WebKit does not always start a preloaded element afterwards.
       startTrack(track, true, currentTimeRef.current);
       return;
     }
