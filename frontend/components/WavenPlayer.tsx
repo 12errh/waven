@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -26,7 +27,6 @@ import {
 } from '@/lib/player-logic';
 import type {
   DockSection,
-  MixKind,
   Playlist,
   PlayerSession,
   RepeatMode,
@@ -42,7 +42,7 @@ import {
   subscribeWindowMode,
 } from '@/lib/window-mode';
 import { DesktopControls } from './DesktopControls';
-import { DiscoverMixes } from './DiscoverMixes';
+import { FeaturedCardsRow } from './FeaturedCardsRow';
 import { LeftDock } from './LeftDock';
 import { NowPlayingCard } from './NowPlayingCard';
 import { SecondaryViews } from './SecondaryViews';
@@ -54,15 +54,6 @@ const STORAGE_KEYS = {
 };
 
 const EMPTY_SEARCH: SearchResults = { tracks: [], albums: [], artists: [] };
-
-const MIX_KINDS: MixKind[] = ['recently_added', 'recently_played', 'on_repeat', 'favorites'];
-
-const EMPTY_MIXES: Record<MixKind, Track[]> = {
-  recently_added: [],
-  recently_played: [],
-  on_repeat: [],
-  favorites: [],
-};
 
 function readPlaylists(): Playlist[] {
   if (typeof window === 'undefined') return [];
@@ -116,11 +107,6 @@ export function WavenPlayer() {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [playbackError, setPlaybackError] = useState<PlaybackError | null>(null);
 
-  const [mixes, setMixes] = useState<Record<MixKind, Track[]>>(EMPTY_MIXES);
-  const [mixesLoaded, setMixesLoaded] = useState(false);
-  const [mixRevision, setMixRevision] = useState(0);
-  const [activeMix, setActiveMix] = useState<MixKind>('recently_added');
-
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResponse, setSearchResponse] = useState<{
     query: string;
@@ -171,7 +157,6 @@ export function WavenPlayer() {
     resolveTrack,
     getTrack,
     hydrateTracks,
-    loadMix,
     reportDuration,
     toggleLike,
   } = library;
@@ -284,7 +269,6 @@ export function WavenPlayer() {
             if (api && !libraryRef.current.preview) {
               void api
                 .recordPlay(trackId, Math.round(time * 1000))
-                .then(() => setMixRevision((value) => value + 1))
                 .catch(() => {
                   // History is best effort; playback continues either way.
                 });
@@ -912,29 +896,6 @@ export function WavenPlayer() {
     // again when it lands avoids a stale "Nothing playing" tray label.
   }, [sessionLoaded, currentTrackId, isPlaying, currentTrack, reportTrayState]);
 
-  // Load the four Discover mixes. Play history changes bump mixRevision so On
-  // Repeat picks up new listens without leaving the screen.
-  useEffect(() => {
-    if (!library.ready) return;
-    let closed = false;
-    void Promise.all(
-      MIX_KINDS.map(async (kind) => {
-        try {
-          return [kind, await loadMix(kind, 60)] as const;
-        } catch {
-          return [kind, []] as const;
-        }
-      })
-    ).then((entries) => {
-      if (closed) return;
-      setMixes(Object.fromEntries(entries) as Record<MixKind, Track[]>);
-      setMixesLoaded(true);
-    });
-    return () => {
-      closed = true;
-    };
-  }, [library.ready, library.revision, mixRevision, loadMix]);
-
   // Surface scan completion as a transient toast.
   const lastScan = library.scan.last;
   useEffect(() => {
@@ -1068,7 +1029,7 @@ export function WavenPlayer() {
     return engineRef.current?.readAnalyser(target) ?? false;
   }, []);
 
-  const activeMixTracks = mixes[activeMix] ?? EMPTY_MIXES[activeMix];
+  const featuredTracks = useMemo(() => library.recent.slice(0, 3), [library.recent]);
 
   const isCurrentLiked =
     currentTrack !== null && (library.likes.has(currentTrack.id) || currentTrack.liked);
@@ -1243,29 +1204,28 @@ export function WavenPlayer() {
                     </section>
                   ) : (
                     <>
-                      <DiscoverMixes
-                        mixes={mixes}
-                        activeMix={activeMix}
-                        onSelect={setActiveMix}
+                      <FeaturedCardsRow
+                        tracks={featuredTracks}
+                        currentTrackId={currentTrackId}
+                        isPlaying={isPlaying}
+                        likedIds={library.likes}
+                        onPlayTrack={(track) => playTrack(track)}
+                        onToggleLike={handleToggleLike}
                       />
                       <TrackListPanel
-                        tracks={activeMixTracks}
+                        tracks={library.recent}
                         currentTrackId={currentTrackId}
                         isPlaying={isPlaying}
                         likedIds={library.likes}
                         playlists={playlists}
-                        onPlayTrack={(track) => playTrack(track, activeMixTracks)}
+                        onPlayTrack={(track) => playTrack(track, library.recent)}
                         onToggleLike={handleToggleLike}
                         onAddToQueue={handleAddToQueue}
                         onAddToPlaylist={handleAddToPlaylist}
                         emptyMessage={
-                          !mixesLoaded
-                            ? 'Building your mixes…'
-                            : activeMix === 'favorites'
-                              ? 'Like a song and it will appear here.'
-                              : activeMix === 'on_repeat'
-                                ? 'Tracks played three times in the last two weeks show up here.'
-                                : 'No tracks in this mix yet.'
+                          library.ready
+                            ? 'No tracks yet. Add a music folder in the Library tab.'
+                            : 'Loading your library…'
                         }
                       />
                     </>

@@ -26,7 +26,7 @@ underneath it — not a redesign.
 | Frontend | Existing Next.js app, static export, embedded in the binary |
 | Default window look | Glass + ambient cover tint, with Solid fallback |
 | Mini player | Included in v1 |
-| Discover screen | In-library mixes (Recently Added, Recently Played, On Repeat, Favorites) |
+| Home / Discover | Original featured cards and recent-track list; in-library mix queries remain available behind the library API |
 | Formats | MP3, AAC/M4A, FLAC, WAV, AIFF, OGG, Opus; audio from MP4/M4V/WebM/MKV containers |
 | ALAC | Not in v1 |
 | Library scale | Designed for up to ~50k tracks |
@@ -468,11 +468,10 @@ Session JSON:
 - **Add Folder / Rescan** replace the upload and stream-URL forms, using the same card
   and button styles.
 - **Profile** becomes library stats: track count, albums, hours, folders, cache size.
-- **Discover** becomes in-library mixes:
-  - Recently Added (`ORDER BY added_at DESC`)
-  - Recently Played (distinct tracks from recent plays)
-  - On Repeat (≥3 plays in 14 days)
-  - Favorites (`liked = 1`)
+- **Discover** keeps the original three featured cards and the recent-track list.
+  The four in-library mix queries (Recently Added, Recently Played, On Repeat,
+  Favorites) stay available through `LibraryService.GetMix` for a future
+  dedicated surface.
 - **Keyboard:** Space, ←/→ seek 5s, N/P next/prev, L like, Cmd/Ctrl+F search, Esc back.
 - **Focus states** and visible keyboard navigation are added to interactive controls.
 - **Empty states** for: no folders, scanning, no results, no liked tracks, empty playlist.
