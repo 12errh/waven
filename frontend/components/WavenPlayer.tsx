@@ -1152,7 +1152,7 @@ export function WavenPlayer() {
       data-file-drop-target="waven-library"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="waven-app relative h-dvh max-h-dvh w-full flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-hidden"
+      className="waven-app relative h-dvh max-h-dvh w-full flex items-center justify-center px-3 pt-10 pb-24 sm:px-6 lg:px-10 lg:pt-12 lg:pb-10 overflow-hidden"
     >
       {/* Drop affordance. The Wails runtime toggles .file-drop-target-active on
           this element while files hover the window. */}
