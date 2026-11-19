@@ -35,10 +35,10 @@ import type {
   Track,
 } from '@/lib/types';
 import { useLibrary } from '@/lib/use-library';
+import { useSettings } from '@/lib/use-settings';
 import {
   DEFAULT_WINDOW_MODE,
   getWindowModeSnapshot,
-  setWindowMode as setWindowModePreference,
   subscribeWindowMode,
 } from '@/lib/window-mode';
 import { DesktopControls } from './DesktopControls';
@@ -88,6 +88,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 export function WavenPlayer() {
   const library = useLibrary();
+  const settings = useSettings();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
   const [dockSection, setDockSection] = useState<DockSection>('home');
@@ -1126,7 +1127,10 @@ export function WavenPlayer() {
                 Browser preview
               </span>
             )}
-            <DesktopControls mode={windowMode} onModeChange={setWindowModePreference} />
+            <DesktopControls
+              mode={windowMode}
+              onModeChange={(mode) => void settings.update({ windowMode: mode })}
+            />
           </header>
 
           {/* 2-Column Content Area */}
@@ -1251,6 +1255,7 @@ export function WavenPlayer() {
               ) : (
                 <SecondaryViews
                   library={library}
+                  settings={settings}
                   dockSection={dockSection}
                   topTab={topTab}
                   currentTrackId={currentTrackId}

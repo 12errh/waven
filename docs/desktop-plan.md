@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phases 0–2 complete; Phase 3 next
+**Status:** Phases 0–3 complete; Phase 4 next
 **Date:** 2026-11-19
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -347,7 +347,7 @@ If a parser fails, duration is 0. The frontend reports the real duration from
 | `Playlist` | `List`, `Create`, `Rename`, `Delete`, `AddTrack`, `RemoveTrack`, `Reorder` |
 | `Player` | `UpdateState`, `GetSession`, `SaveSession`, `RecordPlay` |
 | `Settings` | `Get`, `Update` |
-| `Window` | `ShowFull`, `ShowMini`, `SetAlwaysOnTop`, `Quit` |
+| `Window` | `Show`, `Hide`, `Quit`, `Info` |
 
 Go → frontend events:
 
@@ -738,17 +738,29 @@ Verified by `internal/media/server_test.go` (mid-file Range on a 50 MB FLAC),
 shutdown flush), and `frontend/lib/player-logic.test.ts` (stable shuffle, all
 repeat modes, end-of-queue, resume clamping, play thresholds).
 
-### Phase 3 — Desktop behavior (1–2 days)
+### Phase 3 — Desktop behavior (1–2 days) ✅
 
-- [ ] Tray menu with live now-playing state and controls.
-- [ ] Close-to-tray, quit flag, single instance.
-- [ ] Window bounds and monitor validation.
-- [ ] Settings screen: library folders, appearance, playback, about.
-- [ ] Autostart toggle and `--hidden`.
-- [ ] Transparency detection/fallbacks per platform.
+- [x] Tray menu with live now-playing state and controls.
+- [x] Close-to-tray, quit flag, single instance.
+- [x] Window bounds and monitor validation.
+- [x] Settings screen: library folders, appearance, playback, about.
+- [x] Autostart toggle and `--hidden`.
+- [x] Transparency detection/fallbacks per platform.
 
 **Done when:** closing hides the app, audio keeps playing, tray controls work, a second
 launch focuses the first, and settings survive restart.
+
+Verified by `internal/desktop/settings_test.go` (defaults, round-trip, autostart rollback,
+window mode normalisation), `bounds_test.go` (monitor fitting, off-screen recentre, edge
+margin), and `autostart_linux_test.go` (entry contents, `--hidden`, Exec quoting). The
+`WAVEN_SMOKE=1 WAVEN_SMOKE_LIBRARY=1` run against an isolated library confirmed: scanning and
+playback, tray play/pause changing the live transport, audio advancing while the window was
+hidden, tray restore, Settings with three toggles and three appearance cards, user-driven
+maximise persistence, and the autostart entry updating to `Exec="…/waven" --hidden`. A second
+launch focuses the first instance, and relaunching restores `window.bounds` and `window.mode`.
+
+Mini-player actions (`ShowMini`, `SetAlwaysOnTop`) remain part of Phase 4 rather than the
+Phase 3 `Window` surface.
 
 ### Phase 4 — Library UX (1–2 days)
 

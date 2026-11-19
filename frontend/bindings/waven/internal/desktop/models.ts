@@ -98,6 +98,91 @@ export class AlbumPage {
 }
 
 /**
+ * AppInfo is read-only information for the About section.
+ */
+export class AppInfo {
+    "version": string;
+    "platform": string;
+    "dataDir": string;
+    "cacheDir": string;
+    "trayAvailable": boolean;
+    "autostartSupported": boolean;
+
+    /** Creates a new AppInfo instance. */
+    constructor($$source: Partial<AppInfo> = {}) {
+        if (!("version" in $$source)) {
+            this["version"] = "";
+        }
+        if (!("platform" in $$source)) {
+            this["platform"] = "";
+        }
+        if (!("dataDir" in $$source)) {
+            this["dataDir"] = "";
+        }
+        if (!("cacheDir" in $$source)) {
+            this["cacheDir"] = "";
+        }
+        if (!("trayAvailable" in $$source)) {
+            this["trayAvailable"] = false;
+        }
+        if (!("autostartSupported" in $$source)) {
+            this["autostartSupported"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AppInfo instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AppInfo {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AppInfo($$parsedSource as Partial<AppInfo>);
+    }
+}
+
+/**
+ * AppSettings is the user-editable desktop configuration. Window bounds are
+ * stored separately because the shell writes them automatically.
+ */
+export class AppSettings {
+    "windowMode": string;
+    "closeToTray": boolean;
+    "startHidden": boolean;
+    "autostart": boolean;
+    "alwaysOnTopMini": boolean;
+
+    /** Creates a new AppSettings instance. */
+    constructor($$source: Partial<AppSettings> = {}) {
+        if (!("windowMode" in $$source)) {
+            this["windowMode"] = "";
+        }
+        if (!("closeToTray" in $$source)) {
+            this["closeToTray"] = false;
+        }
+        if (!("startHidden" in $$source)) {
+            this["startHidden"] = false;
+        }
+        if (!("autostart" in $$source)) {
+            this["autostart"] = false;
+        }
+        if (!("alwaysOnTopMini" in $$source)) {
+            this["alwaysOnTopMini"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AppSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AppSettings {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AppSettings($$parsedSource as Partial<AppSettings>);
+    }
+}
+
+/**
  * Artist is a grouped artist for the Artists tab.
  */
 export class Artist {

@@ -11,12 +11,27 @@ import (
 )
 
 func main() {
+	startHidden := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--hidden" || arg == "-hidden" {
+			startHidden = true
+		}
+	}
+
+	// The second-instance callback needs the shell, which is created after the
+	// application. The callback runs on a later launch, so the pointer is set
+	// by then.
+	var shell *desktop.Desktop
+	assetsHandler := application.AssetFileServerFS(assetsFS())
+	if os.Getenv("WAVEN_SMOKE") == "1" {
+		assetsHandler = desktop.SmokeProbe(assetsHandler)
+	}
 	options := application.Options{
 		Name:        "WAVEN",
 		Description: "A spatial music player for your local library.",
 		Icon:        desktop.AppIcon(),
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assetsFS()),
+			Handler: assetsHandler,
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -28,6 +43,16 @@ func main() {
 			DisableQuitOnLastWindowClosed: true,
 			ProgramName:                   "waven",
 			ApplicationID:                 "app.waven.desktop",
+		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "app.waven.desktop",
+			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+				if shell == nil {
+					return
+				}
+				log.Printf("single instance: focusing the existing window")
+				shell.Show()
+			},
 		},
 	}
 	if os.Getenv("WAVEN_DEBUG") == "1" {
@@ -42,12 +67,19 @@ func main() {
 	}
 	app.RegisterService(application.NewService(libraryService))
 
-	shell := desktop.New(app)
+	settingsService, err := desktop.NewSettingsService(libraryService)
+	if err != nil {
+		log.Fatal(err)
+	}
+	app.RegisterService(application.NewService(settingsService))
+
+	shell = desktop.New(app, settingsService, startHidden)
 	playerService, err := desktop.NewPlayerService(app, libraryService, shell)
 	if err != nil {
 		log.Fatal(err)
 	}
 	app.RegisterService(application.NewService(playerService))
+	app.RegisterService(application.NewService(desktop.NewWindowService(shell)))
 
 	shell.Start()
 

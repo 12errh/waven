@@ -3,6 +3,13 @@ export type WindowMode = 'glass' | 'pure' | 'solid';
 export const DEFAULT_WINDOW_MODE: WindowMode = 'glass';
 export const WINDOW_MODE_STORAGE_KEY = 'waven_window_mode_v1';
 
+export const WINDOW_MODE_SWATCHES: Record<WindowMode, string> = {
+  glass:
+    'border-white/40 bg-[linear-gradient(135deg,rgba(255,255,255,0.58),rgba(255,255,255,0.06))]',
+  pure: 'border-white/60 bg-transparent',
+  solid: 'border-white/25 bg-[#07080b]',
+};
+
 export const WINDOW_MODES: Array<{
   id: WindowMode;
   label: string;
@@ -36,11 +43,16 @@ export function isWindowMode(value: string | null): value is WindowMode {
 const listeners = new Set<() => void>();
 
 export function readStoredWindowMode(): WindowMode {
+  return readWindowModeStorage() ?? DEFAULT_WINDOW_MODE;
+}
+
+/** Returns the stored mode, or null when the user has never chosen one. */
+export function readWindowModeStorage(): WindowMode | null {
   try {
     const saved = window.localStorage.getItem(WINDOW_MODE_STORAGE_KEY);
-    return isWindowMode(saved) ? saved : DEFAULT_WINDOW_MODE;
+    return isWindowMode(saved) ? saved : null;
   } catch {
-    return DEFAULT_WINDOW_MODE;
+    return null;
   }
 }
 

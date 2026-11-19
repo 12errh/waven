@@ -23,7 +23,9 @@ export function loadDesktopRuntime(): Promise<RuntimeModule> | null {
  * Runs a native window action through the Wails runtime. A browser preview has
  * no native window, so a missing runtime is treated as a no-op.
  */
-export async function runWindowAction(action: 'minimise' | 'close'): Promise<void> {
+export async function runWindowAction(
+  action: 'minimise' | 'maximise' | 'close'
+): Promise<void> {
   const runtimePromise = loadDesktopRuntime();
   if (!runtimePromise) return;
 
@@ -31,6 +33,10 @@ export async function runWindowAction(action: 'minimise' | 'close'): Promise<voi
     const { Window } = await runtimePromise;
     if (action === 'minimise') {
       await Window.Minimise();
+      return;
+    }
+    if (action === 'maximise') {
+      await Window.ToggleMaximise();
       return;
     }
     // The Go shell intercepts WindowClosing and hides to the tray instead of

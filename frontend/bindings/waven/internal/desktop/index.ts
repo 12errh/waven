@@ -3,14 +3,20 @@
 
 import * as LibraryService from "./libraryservice.js";
 import * as PlayerService from "./playerservice.js";
+import * as SettingsService from "./settingsservice.js";
+import * as WindowService from "./windowservice.js";
 export {
     LibraryService,
-    PlayerService
+    PlayerService,
+    SettingsService,
+    WindowService
 };
 
 export {
     Album,
     AlbumPage,
+    AppInfo,
+    AppSettings,
     Artist,
     ArtistPage,
     Genre,

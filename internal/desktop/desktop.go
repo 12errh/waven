@@ -34,16 +34,33 @@ type Desktop struct {
 	trayTrack     *application.MenuItem
 	trayPlayPause *application.MenuItem
 	nowPlaying    PlayerState
+	trayLabel     string
 	quitting      atomic.Bool
+	started       atomic.Bool
 	trayAvailable atomic.Bool
+	maximized     atomic.Bool
+
+	settings    *SettingsService
+	startHidden bool
+
+	boundsLock   sync.Mutex
+	normalBounds application.Rect
+	boundsTimer  *time.Timer
 }
 
-func New(app *application.App) *Desktop {
-	return &Desktop{app: app}
+// New wires the desktop shell to the persisted settings. startHidden is true
+// when the process was launched with --hidden; the saved app.startHidden
+// preference is applied inside Start.
+func New(app *application.App, settings *SettingsService, startHidden bool) *Desktop {
+	return &Desktop{app: app, settings: settings, startHidden: startHidden}
 }
 
 func (d *Desktop) Start() {
+	if d.settings != nil && d.settings.startHidden() {
+		d.startHidden = true
+	}
 	d.createWindow()
+	d.debugf("created window hidden=%v visible=%v", d.startHidden, d.window.IsVisible())
 
 	// The tray icon is only visible when the desktop provides a
 	// StatusNotifierItem host. Without one, closing the window must quit
@@ -57,14 +74,32 @@ func (d *Desktop) Start() {
 			d.ensureTray()
 			return
 		}
-		log.Printf("tray: no StatusNotifier host; the window quits on close")
+		if d.startHidden {
+			// --hidden (or app.startHidden) without a tray would strand the
+			// process invisible. Show the window instead; before the event loop
+			// starts this is deferred to ApplicationStarted so the saved bounds
+			// are applied before the first map.
+			log.Printf("tray: no StatusNotifier host; showing the window for --hidden")
+			d.showAfterTrayLoss()
+		} else {
+			log.Printf("tray: no StatusNotifier host; the window quits on close")
+		}
 	})
 
-	// Window size can only be validated once the platform has cached the
-	// connected displays. Give the first frame a beat, then fit the shell to
-	// the primary display's work area.
+	// Window size and placement can only be validated once the platform has
+	// cached the connected displays. Give the first frame a beat, then restore
+	// the saved bounds against the monitors that are actually present. If the
+	// app started hidden and no tray host exists to restore it, present it only
+	// after the bounds are in place: mapping the oversized default window first
+	// makes compositors such as Mutter maximise it.
 	d.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		time.AfterFunc(200*time.Millisecond, d.fitToScreen)
+		d.started.Store(true)
+		time.AfterFunc(200*time.Millisecond, func() {
+			d.restoreWindow()
+			if d.startHidden && !d.trayAvailable.Load() {
+				d.showAfterTrayLoss()
+			}
+		})
 	})
 
 	if os.Getenv("WAVEN_SMOKE") == "1" {
@@ -72,12 +107,52 @@ func (d *Desktop) Start() {
 	}
 }
 
-func (d *Desktop) createWindow() {
-	backgroundType := application.BackgroundTypeTransparent
+// nativeWindowAppearance returns the native window options that let every CSS
+// appearance mode work. The window is always transparent (or translucent where
+// the platform supports a real backdrop), so switching between Glass, Pure,
+// and Solid is a CSS change that takes effect immediately instead of needing a
+// restart. Platform fallbacks follow docs/desktop-plan.md §8.2: Windows 10
+// gets a transparent window with no blur, Windows 11 22H2+ gets Acrylic,
+// macOS uses Liquid Glass (with a translucent fallback in Wails), and Linux
+// relies on the compositor.
+func nativeWindowAppearance() (
+	application.BackgroundType,
+	application.RGBA,
+	application.MacBackdrop,
+	application.BackdropType,
+	bool,
+) {
+	backgroundColour := application.NewRGBA(0, 0, 0, 0)
 	if runtime.GOOS == "windows" {
-		// Windows needs the translucent type for Mica/Acrylic backdrops.
-		backgroundType = application.BackgroundTypeTranslucent
+		if windowsSupportsAcrylic() {
+			return application.BackgroundTypeTranslucent,
+				backgroundColour,
+				application.MacBackdropTranslucent,
+				application.Acrylic,
+				true
+		}
+		return application.BackgroundTypeTransparent,
+			backgroundColour,
+			application.MacBackdropTransparent,
+			application.None,
+			true
 	}
+	if runtime.GOOS == "darwin" {
+		return application.BackgroundTypeTransparent,
+			backgroundColour,
+			application.MacBackdropLiquidGlass,
+			application.None,
+			true
+	}
+	return application.BackgroundTypeTransparent,
+		backgroundColour,
+		application.MacBackdropTransparent,
+		application.None,
+		true
+}
+
+func (d *Desktop) createWindow() {
+	backgroundType, backgroundColour, macBackdrop, windowsBackdrop, translucent := nativeWindowAppearance()
 
 	window := d.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
@@ -87,30 +162,30 @@ func (d *Desktop) createWindow() {
 		MinWidth:         minimumWindowWidth,
 		MinHeight:        minimumWindowHeight,
 		Frameless:        true,
+		Hidden:           d.startHidden,
 		BackgroundType:   backgroundType,
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		BackgroundColour: backgroundColour,
 		InitialPosition:  application.WindowCentered,
 		Mac: application.MacWindow{
-			Backdrop:                application.MacBackdropTranslucent,
+			Backdrop:                macBackdrop,
 			CornerType:              application.MacWindowCornerTypeRounded,
 			CornerRadius:            28,
 			InvisibleTitleBarHeight: 40,
 		},
 		Windows: application.WindowsWindow{
-			BackdropType: application.Acrylic,
+			BackdropType: windowsBackdrop,
 			Theme:        application.Dark,
 		},
 		Linux: application.LinuxWindow{
-			WindowIsTranslucent: true,
+			WindowIsTranslucent: translucent,
 			WebviewGpuPolicy:    application.WebviewGpuPolicyAlways,
 			Icon:                appIcon,
 		},
 	})
 
-	// Closing the window means "hide to tray", not "quit". The tray's Quit
+	// Closing the window means "hide to tray", not "quit", unless the user
+	// turned that off or there is no tray to restore from. The tray's Quit
 	// action sets the flag first so the process can actually terminate.
-	// Desktops without a StatusNotifierItem host have no tray to restore from,
-	// so in that case close quits the app instead of hiding it forever.
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		if d.quitting.Load() {
 			return
@@ -121,13 +196,59 @@ func (d *Desktop) createWindow() {
 			go d.Quit()
 			return
 		}
+		if d.settings != nil && !d.settings.closeToTray() {
+			log.Printf("window closing: close-to-tray is off; quitting")
+			event.Cancel()
+			go d.Quit()
+			return
+		}
 		d.debugf("window closing: hiding to tray")
-		window.Hide()
+		d.Hide()
 		event.Cancel()
 	})
 
+	d.registerWindowStateHooks(window)
 	d.registerDiagnosticHooks(window)
 	d.window = window
+}
+
+// registerWindowStateHooks records the normal window placement after a move or
+// resize and keeps the maximised flag separate. Writes are debounced because a
+// drag emits a move for every pointer step.
+func (d *Desktop) registerWindowStateHooks(window *application.WebviewWindow) {
+	window.RegisterHook(events.Common.WindowDidMove, func(*application.WindowEvent) {
+		d.scheduleSaveBounds(450 * time.Millisecond)
+	})
+	window.RegisterHook(events.Common.WindowDidResize, func(*application.WindowEvent) {
+		d.scheduleSaveBounds(450 * time.Millisecond)
+	})
+	window.RegisterHook(events.Common.WindowMaximise, func(*application.WindowEvent) {
+		width, height := window.Size()
+		d.boundsLock.Lock()
+		normal := d.normalBounds
+		d.boundsLock.Unlock()
+		if normal.Width == width && normal.Height == height {
+			// Mutter marks a window that exactly fills the work area as
+			// maximised when it is mapped, even though the geometry did not
+			// change and the user did not ask for it. Undo the flag so the next
+			// launch still opens the saved normal size.
+			d.debugf("ignoring map-time maximise at %dx%d", width, height)
+			time.AfterFunc(50*time.Millisecond, func() {
+				if window.IsMaximised() {
+					window.UnMaximise()
+				}
+			})
+			return
+		}
+		d.debugf("window maximised: size=%dx%d", width, height)
+		d.maximized.Store(true)
+		d.scheduleSaveBounds(50 * time.Millisecond)
+	})
+	window.RegisterHook(events.Common.WindowUnMaximise, func(*application.WindowEvent) {
+		d.debugf("window unmaximised")
+		d.maximized.Store(false)
+		d.scheduleSaveBounds(250 * time.Millisecond)
+	})
 }
 
 func (d *Desktop) ensureTray() {
@@ -168,7 +289,7 @@ func (d *Desktop) createTray() {
 		d.app.Event.Emit("tray:next")
 	})
 	menu.AddSeparator()
-	menu.Add("Open WAVEN").OnClick(func(*application.Context) {
+	menu.Add("Show WAVEN").OnClick(func(*application.Context) {
 		d.Show()
 	})
 	menu.Add("Hide WAVEN").OnClick(func(*application.Context) {
@@ -211,6 +332,10 @@ func (d *Desktop) applyNowPlayingLocked() {
 	if d.trayTrack != nil {
 		d.trayTrack.SetLabel(label)
 	}
+	if label != d.trayLabel {
+		d.trayLabel = label
+		d.debugf("tray track: %s", label)
+	}
 	if d.trayPlayPause != nil {
 		if d.nowPlaying.Playing {
 			d.trayPlayPause.SetLabel("Pause")
@@ -233,11 +358,28 @@ func (d *Desktop) Show() {
 	d.window.Focus()
 }
 
-// Hide sends the window to the tray.
+// showAfterTrayLoss reveals a window that was meant to start hidden when no
+// StatusNotifier host is available to restore it. Before Wails starts, the
+// show is skipped: ApplicationStarted calls this again once the saved bounds
+// have been applied, so the first map is already the right size.
+func (d *Desktop) showAfterTrayLoss() {
+	if !d.started.Load() || d.quitting.Load() {
+		return
+	}
+	width, height := d.window.Size()
+	d.debugf("showing without a tray: size=%dx%d maximised=%v", width, height, d.window.IsMaximised())
+	d.Show()
+	width, height = d.window.Size()
+	d.debugf("shown without a tray: size=%dx%d maximised=%v", width, height, d.window.IsMaximised())
+}
+
+// Hide sends the window to the tray. Placement is saved first so closing right
+// after a drag never loses the last position to a pending debounce.
 func (d *Desktop) Hide() {
 	if d.window == nil {
 		return
 	}
+	d.saveBoundsNow()
 	d.window.Hide()
 }
 
@@ -258,14 +400,66 @@ func (d *Desktop) Toggle() {
 
 // Quit exits the process, including any playback running in the background.
 func (d *Desktop) Quit() {
+	d.saveBoundsNow()
 	d.quitting.Store(true)
 	d.app.Quit()
 }
 
+// restoreWindow applies the saved placement after validating it against the
+// monitors that are currently connected. A window saved on a disconnected
+// display is centered on the primary display instead of opening off-screen.
+func (d *Desktop) restoreWindow() {
+	if d.window == nil {
+		return
+	}
+
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		screens := d.app.Screen.GetAll()
+		if len(screens) > 0 {
+			saved, hasSaved := WindowBounds{}, false
+			if d.settings != nil {
+				saved, hasSaved = d.settings.windowBounds()
+			}
+			rect, ok := fitWindowBounds(
+				saved,
+				hasSaved,
+				screens,
+				defaultWindowWidth,
+				defaultWindowHeight,
+				minimumWindowWidth,
+				minimumWindowHeight,
+			)
+			if !ok {
+				d.fitToScreen()
+				return
+			}
+			d.debugf("restoring window bounds %dx%d at %d,%d (saved=%v maximized=%v) visible=%v",
+				rect.Width, rect.Height, rect.X, rect.Y, hasSaved, hasSaved && saved.Maximized, d.window.IsVisible())
+			d.setNormalBounds(rect)
+			d.maximized.Store(hasSaved && saved.Maximized)
+			d.window.SetBounds(rect)
+			d.debugf("restored bounds visible=%v", d.window.IsVisible())
+			if hasSaved && saved.Maximized {
+				d.window.Maximise()
+			} else if d.window.IsMaximised() {
+				// Some compositors auto-maximise a window that fills the work
+				// area while it maps. The saved state is normal, so undo it.
+				d.window.UnMaximise()
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			d.debugf("primary screen unavailable; keeping default window size")
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
 // fitToScreen keeps the default window size on large displays, but shrinks it
-// to the primary display's work area on small laptop screens. The platform can
-// take a moment to report its displays, so this waits for the screen manager to
-// become ready instead of trusting the first frame.
+// to the primary display's work area on small laptop screens. It is the
+// fallback when the screen manager cannot report a display.
 func (d *Desktop) fitToScreen() {
 	if d.window == nil {
 		return
@@ -309,6 +503,60 @@ func (d *Desktop) applyWindowBounds(screen *application.Screen) {
 		d.window.SetSize(width, height)
 	}
 	d.window.Center()
+	x, y := d.window.Position()
+	d.setNormalBounds(application.Rect{X: x, Y: y, Width: width, Height: height})
+}
+
+func (d *Desktop) setNormalBounds(bounds application.Rect) {
+	d.boundsLock.Lock()
+	d.normalBounds = bounds
+	d.boundsLock.Unlock()
+}
+
+func (d *Desktop) scheduleSaveBounds(delay time.Duration) {
+	d.boundsLock.Lock()
+	if d.boundsTimer != nil {
+		d.boundsTimer.Stop()
+	}
+	d.boundsTimer = time.AfterFunc(delay, d.saveBoundsNow)
+	d.boundsLock.Unlock()
+}
+
+// saveBoundsNow persists the normal placement and the maximised flag. The flag
+// is tracked from maximise/unmaximise events instead of IsMaximised(): some
+// compositors report a window that fills the work area as maximised even
+// though the user never asked for it. While maximised, Bounds() reports the
+// maximised frame, so the last normal bounds are kept instead.
+func (d *Desktop) saveBoundsNow() {
+	if d.window == nil || d.settings == nil {
+		return
+	}
+
+	maximized := d.maximized.Load()
+	if !maximized && !d.window.IsMaximised() {
+		bounds := d.window.Bounds()
+		if bounds.Width > 0 && bounds.Height > 0 {
+			d.setNormalBounds(bounds)
+		}
+	}
+
+	d.boundsLock.Lock()
+	normal := d.normalBounds
+	d.boundsLock.Unlock()
+	if normal.Width <= 0 || normal.Height <= 0 {
+		return
+	}
+
+	saved := WindowBounds{
+		X:         normal.X,
+		Y:         normal.Y,
+		Width:     normal.Width,
+		Height:    normal.Height,
+		Maximized: maximized,
+	}
+	if err := d.settings.saveWindowBounds(saved); err != nil {
+		log.Printf("save window bounds: %v", err)
+	}
 }
 
 // smokeTest exercises the window controls, close-to-hide, and restore when
@@ -341,6 +589,47 @@ func (d *Desktop) smokeTest() {
 	})()`)
 	time.Sleep(500 * time.Millisecond)
 
+	// A seeded library proves that playback survives hiding to the tray. The
+	// test data path is opt-in so the normal smoke run does not depend on
+	// files outside the app.
+	audioSmoke := os.Getenv("WAVEN_SMOKE_LIBRARY") == "1"
+	probeAudio := func(stage string) {
+		if !audioSmoke {
+			return
+		}
+		d.window.ExecJS(`(() => {
+			const seek = document.querySelector('[aria-label="Seek track progress"]');
+			const pause = document.querySelector('[aria-label="Pause playback"]');
+			const track = document.querySelector('section[aria-label="Track list"] button[aria-label^="Pause "]');
+			fetch('/waven-probe?audio=` + stage + `&playing=' + (pause ? 'yes' : 'no') +
+				'&position=' + encodeURIComponent(seek?.getAttribute('aria-valuenow') ?? 'missing') +
+				'&track=' + encodeURIComponent(track?.getAttribute('aria-label') ?? 'none'));
+		})()`)
+		time.Sleep(400 * time.Millisecond)
+	}
+	if audioSmoke {
+		log.Printf("smoke: scanning the seeded library")
+		d.window.ExecJS(`document.querySelector('[aria-label="Music library and folders"]')?.click()`)
+		time.Sleep(700 * time.Millisecond)
+		d.window.ExecJS(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Rescan all'))?.click()`)
+		time.Sleep(3 * time.Second)
+
+		log.Printf("smoke: starting playback from the library")
+		d.window.ExecJS(`document.querySelector('[aria-label="Home"]')?.click()`)
+		time.Sleep(1200 * time.Millisecond)
+		d.window.ExecJS(`document.querySelector('section[aria-label="Track list"] button[aria-label^="Play "]')?.click()`)
+		time.Sleep(2500 * time.Millisecond)
+		probeAudio("started")
+
+		log.Printf("smoke: tray play/pause")
+		d.app.Event.Emit("tray:playPause")
+		time.Sleep(900 * time.Millisecond)
+		probeAudio("pausedFromTray")
+		d.app.Event.Emit("tray:playPause")
+		time.Sleep(900 * time.Millisecond)
+		probeAudio("resumedFromTray")
+	}
+
 	// Verify that the appearance control updates the DOM and persists the
 	// choice. The probe appears in the dev log alongside the other smoke data.
 	log.Printf("smoke: switching to the solid appearance")
@@ -356,6 +645,57 @@ func (d *Desktop) smokeTest() {
 	log.Printf("smoke: restoring the glass appearance")
 	d.window.ExecJS(`document.querySelector('[aria-label="Glass with ambient tint from the current cover"]')?.click()`)
 	time.Sleep(300 * time.Millisecond)
+
+	// A user-driven maximise must persist as a maximise flag, and restoring
+	// must clear it again. This runs while the page is visible so it exercises
+	// the same toggle the header button uses.
+	log.Printf("smoke: maximising the window")
+	d.window.ExecJS(`document.querySelector('[aria-label="Maximise or restore window"]')?.click()`)
+	time.Sleep(1500 * time.Millisecond)
+	saved, _ := d.settings.windowBounds()
+	log.Printf("smoke: maximised=%v savedMaximized=%v", d.window.IsMaximised(), saved.Maximized)
+	d.window.ExecJS(`document.querySelector('[aria-label="Maximise or restore window"]')?.click()`)
+	time.Sleep(1500 * time.Millisecond)
+	saved, _ = d.settings.windowBounds()
+	log.Printf("smoke: restored maximised=%v savedMaximized=%v", d.window.IsMaximised(), saved.Maximized)
+
+	// Open Settings through the profile avatar. The probe verifies that the
+	// folder, appearance, playback, and about sections rendered from the shared
+	// components rather than the old profile-only view.
+	log.Printf("smoke: opening settings")
+	d.window.ExecJS(`document.querySelector('[aria-label="Listener profile and settings"]')?.click()`)
+	time.Sleep(800 * time.Millisecond)
+	d.window.ExecJS(`(() => {
+		const text = document.body.innerText;
+		const open = text.includes('About WAVEN') && text.includes('Library folders');
+		const toggles = document.querySelectorAll('[role="switch"]').length;
+		const radios = document.querySelectorAll('[role="radio"]').length;
+		fetch('/waven-probe?settings=' + (open ? 'open' : 'missing') + '&toggles=' + toggles + '&radios=' + radios);
+	})()`)
+	time.Sleep(500 * time.Millisecond)
+
+	// Exercise the real Settings binding: the toggle is optimistic, then the
+	// Go service writes app.autostart and the login entry. With a tray host,
+	// "Start hidden" is enabled too; turning it on must rewrite the autostart
+	// entry with --hidden.
+	if d.trayAvailable.Load() {
+		log.Printf("smoke: enabling start hidden from settings")
+		d.window.ExecJS(`document.querySelector('[role="switch"][aria-label="Start hidden"]')?.click()`)
+		time.Sleep(900 * time.Millisecond)
+	}
+	log.Printf("smoke: enabling autostart from settings")
+	d.window.ExecJS(`document.querySelector('[role="switch"][aria-label="Launch at login"]')?.click()`)
+	time.Sleep(1200 * time.Millisecond)
+	d.window.ExecJS(`(() => {
+		const toggle = document.querySelector('[role="switch"][aria-label="Launch at login"]');
+		const app = document.querySelector('.waven-app');
+		fetch('/waven-probe?autostart=' + encodeURIComponent(toggle?.getAttribute('aria-checked') ?? 'missing') + '&settingsMode=' + encodeURIComponent(app?.dataset.windowMode ?? 'missing'));
+	})()`)
+	time.Sleep(500 * time.Millisecond)
+
+	log.Printf("smoke: returning to Discover")
+	d.window.ExecJS(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to Discover'))?.click()`)
+	time.Sleep(800 * time.Millisecond)
 
 	log.Printf("smoke: clicking the minimise control")
 	d.window.ExecJS(`document.querySelector('[aria-label="Minimise window"]')?.click()`)
@@ -377,9 +717,12 @@ func (d *Desktop) smokeTest() {
 	}
 
 	log.Printf("smoke: clicking the hide-to-tray control")
+	probeAudio("beforeHide")
 	d.window.ExecJS(`document.querySelector('[aria-label="Close WAVEN"]')?.click()`)
 	time.Sleep(1500 * time.Millisecond)
 	log.Printf("smoke: visible after UI close: %v", d.window.IsVisible())
+	time.Sleep(2500 * time.Millisecond)
+	probeAudio("afterHide")
 
 	// Activate the tray item the same way a panel does. This verifies the item
 	// is registered and that a tray click restores the window.
@@ -426,7 +769,7 @@ func (d *Desktop) registerDiagnosticHooks(window *application.WebviewWindow) {
 		log.Printf("debug: window shown")
 	})
 	window.RegisterHook(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
-		log.Printf("debug: frontend runtime ready")
+		log.Printf("debug: frontend runtime ready visible=%v", window.IsVisible())
 	})
 	window.RegisterHook(events.Common.WindowHide, func(*application.WindowEvent) {
 		log.Printf("debug: window hidden")

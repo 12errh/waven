@@ -207,23 +207,14 @@ func (s *LibraryService) ServiceShutdown() error {
 }
 
 func libraryPaths() (string, string, error) {
-	dbRoot := os.Getenv("WAVEN_DATA_DIR")
-	if dbRoot == "" {
-		config, err := os.UserConfigDir()
-		if err != nil {
-			return "", "", fmt.Errorf("resolve config directory: %w", err)
-		}
-		dbRoot = filepath.Join(config, "waven")
+	dataDir, cacheDir := appPaths()
+	if dataDir == "" {
+		return "", "", fmt.Errorf("resolve config directory")
 	}
-	cacheRoot := os.Getenv("WAVEN_CACHE_DIR")
-	if cacheRoot == "" {
-		cache, err := os.UserCacheDir()
-		if err != nil {
-			return "", "", fmt.Errorf("resolve cache directory: %w", err)
-		}
-		cacheRoot = filepath.Join(cache, "waven")
+	if cacheDir == "" {
+		return "", "", fmt.Errorf("resolve cache directory")
 	}
-	return filepath.Join(dbRoot, "waven.db"), filepath.Join(cacheRoot, "artwork"), nil
+	return filepath.Join(dataDir, "waven.db"), filepath.Join(cacheDir, "artwork"), nil
 }
 
 // PickFolder opens the native folder picker. It returns an empty string when

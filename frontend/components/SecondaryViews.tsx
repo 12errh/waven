@@ -37,11 +37,15 @@ import type {
   Track,
 } from '@/lib/types';
 import type { LibraryController } from '@/lib/use-library';
+import type { SettingsController } from '@/lib/use-settings';
 import { CoverImage } from './CoverImage';
+import { LibraryFoldersPanel } from './LibraryFoldersPanel';
+import { SettingsView } from './SettingsView';
 import { TrackListPanel } from './TrackListPanel';
 
 interface SecondaryViewsProps {
   library: LibraryController;
+  settings: SettingsController;
   dockSection: DockSection;
   topTab: TopTab;
   currentTrackId: number | null;
@@ -68,6 +72,7 @@ interface SecondaryViewsProps {
 
 export function SecondaryViews({
   library,
+  settings,
   dockSection,
   topTab,
   currentTrackId,
@@ -408,155 +413,9 @@ export function SecondaryViews({
 
   // 2. LIBRARY & FOLDER MANAGEMENT
   if (dockSection === 'library') {
-    const progress = library.scan.progress;
-    const progressPct =
-      progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : 0;
-    const last = library.scan.last;
-
     return (
       <div className="flex flex-col gap-4 h-full">
-        <div className="rounded-[24px] bg-white/[0.05] border border-white/[0.11] p-4 space-y-3.5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="font-display text-base font-semibold text-white">
-                Your Music Library
-              </h2>
-              <p className="text-xs text-white/55 mt-0.5">
-                {library.stats.tracks.toLocaleString()} tracks · {library.stats.folders}{' '}
-                {library.stats.folders === 1 ? 'folder' : 'folders'} · Last scan{' '}
-                {formatRelativeTime(library.stats.lastScanAt)}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                disabled={library.scan.running}
-                onClick={() => void library.rescan(0)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:hover:bg-white/10 border border-white/15 text-xs font-medium text-white transition-colors whitespace-nowrap"
-              >
-                <RefreshCw
-                  className={cn('w-3.5 h-3.5', library.scan.running && 'animate-spin')}
-                />
-                <span>Rescan all</span>
-              </button>
-              <button
-                type="button"
-                disabled={library.scan.running}
-                onClick={() => void library.addFolder()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-[#0a0c12] hover:bg-white/90 disabled:opacity-40 text-xs font-semibold transition-colors whitespace-nowrap"
-              >
-                <FolderPlus className="w-3.5 h-3.5" />
-                <span>Add folder</span>
-              </button>
-            </div>
-          </div>
-
-          {library.scan.running && (
-            <div className="rounded-2xl bg-white/[0.05] border border-white/10 px-3.5 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="flex items-center gap-2 text-xs text-white/85 min-w-0">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                  <span className="truncate">
-                    {progress.phase === 'discovering'
-                      ? 'Finding audio files'
-                      : `Scanning ${progress.folderPath || 'library'}`}
-                  </span>
-                </p>
-                <span className="font-mono-tabular text-[11px] text-white/60 shrink-0">
-                  {progress.total > 0 ? `${progress.done} / ${progress.total}` : 'Preparing'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void library.cancelScan()}
-                  className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-[11px] text-white shrink-0"
-                >
-                  Cancel
-                </button>
-              </div>
-              <div className="mt-2.5 h-1 rounded-full bg-white/15 overflow-hidden">
-                <div
-                  className="h-full bg-white/80 rounded-full transition-[width] duration-300"
-                  style={{ width: progress.total > 0 ? `${progressPct}%` : '12%' }}
-                />
-              </div>
-              {progress.currentPath && (
-                <p className="mt-1.5 text-[10px] text-white/40 truncate">{progress.currentPath}</p>
-              )}
-            </div>
-          )}
-
-          {last && !library.scan.running && (
-            <p className="text-[11px] text-white/50">
-              {last.canceled ? 'Cancelled' : 'Last scan'} — {last.added} added, {last.updated}{' '}
-              updated, {last.skipped} unchanged
-              {last.missing > 0 ? `, ${last.missing} missing` : ''}
-              {last.errors.length > 0 ? `, ${last.errors.length} skipped` : ''}
-            </p>
-          )}
-
-          <div className="space-y-1.5">
-            {library.folders.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-white/15 px-4 py-6 text-center">
-                <FolderOpen className="w-6 h-6 text-white/40 mx-auto mb-2" />
-                <p className="text-xs text-white/60">
-                  No music folders yet. Add one and WAVEN will scan it in place.
-                </p>
-              </div>
-            ) : (
-              library.folders.map((folder) => (
-                <div
-                  key={folder.id}
-                  className="flex items-center gap-3 rounded-2xl bg-white/[0.04] border border-white/[0.07] px-3 py-2.5"
-                >
-                  <FolderOpen className="w-4 h-4 text-white/55 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-white/85 truncate" title={folder.path}>
-                      {folder.path}
-                    </p>
-                    <p className="text-[10px] text-white/40">
-                      Scanned {formatRelativeTime(folder.lastScanAt ?? 0)}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={library.scan.running}
-                    onClick={() => void library.rescan(folder.id)}
-                    aria-label={`Rescan ${folder.path}`}
-                    title="Rescan folder"
-                    className="w-8 h-8 rounded-full text-white/55 hover:text-white hover:bg-white/10 disabled:opacity-30 flex items-center justify-center"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={library.scan.running}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Remove "${folder.path}" and its tracks from WAVEN? The files on disk are not deleted.`
-                        )
-                      ) {
-                        void library.removeFolder(folder.id);
-                      }
-                    }}
-                    aria-label={`Remove ${folder.path}`}
-                    title="Remove folder from library"
-                    className="w-8 h-8 rounded-full text-white/55 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-30 flex items-center justify-center"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          {library.preview && (
-            <p className="text-[10px] text-amber-100/60">
-              Browser preview: folder scanning runs against sample data. Open the desktop app to
-              scan real files.
-            </p>
-          )}
-        </div>
+        <LibraryFoldersPanel library={library} />
 
         {/* Play Queue */}
         <div className="flex items-center justify-between px-1">
@@ -669,123 +528,17 @@ export function SecondaryViews({
     );
   }
 
-  // 4. PROFILE VIEW
+  // 4. PROFILE & SETTINGS VIEW
   if (dockSection === 'profile') {
-    const stats = library.stats;
-    const summary: Array<{ label: string; value: string; icon: typeof Music2 }> = [
-      { label: 'Tracks', value: stats.tracks.toLocaleString(), icon: Music2 },
-      { label: 'Albums', value: stats.albums.toLocaleString(), icon: Disc3 },
-      { label: 'Artists', value: stats.artists.toLocaleString(), icon: Heart },
-      { label: 'Genres', value: stats.genres.toLocaleString(), icon: Music2 },
-      { label: 'Folders', value: stats.folders.toLocaleString(), icon: FolderOpen },
-      { label: 'Liked', value: stats.liked.toLocaleString(), icon: Heart },
-      { label: 'Listening time', value: formatLibraryDuration(stats.durationMs), icon: Clock3 },
-      { label: 'Artwork cache', value: formatBytes(stats.cacheBytes), icon: HardDrive },
-    ];
-
     return (
-      <div className="flex flex-col gap-4 h-full">
-        <div className="rounded-[26px] bg-white/[0.05] border border-white/[0.11] p-5 flex items-center gap-4">
-          <CoverImage
-            src={CATALOG_IMAGES.avatar}
-            alt="Listener avatar"
-            className="w-16 h-16 rounded-full object-cover ring-2 ring-white/25"
-          />
-          <div className="min-w-0 flex-1">
-            <h2 className="font-display text-lg font-bold text-white">Studio Listener</h2>
-            <p className="text-xs text-white/60 mt-0.5">
-              {stats.tracks.toLocaleString()} Tracks · {stats.liked.toLocaleString()} Liked ·{' '}
-              {playlists.length} {playlists.length === 1 ? 'Playlist' : 'Playlists'}
-            </p>
-            <p className="text-[10px] text-white/40 mt-1">
-              Local library · Last scan {formatRelativeTime(stats.lastScanAt)}
-              {library.preview ? ' · Browser preview' : ''}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onGoDiscover}
-            className="px-4 py-2 rounded-full bg-white/12 hover:bg-white/20 border border-white/15 text-xs font-medium text-white whitespace-nowrap"
-          >
-            Back to Discover
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {summary.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.label}
-                className="rounded-2xl bg-white/[0.045] border border-white/[0.08] px-3 py-2.5"
-              >
-                <Icon className="w-3.5 h-3.5 text-white/40 mb-1.5" />
-                <p className="font-display text-sm font-semibold text-white">{item.value}</p>
-                <p className="text-[10px] text-white/45">{item.label}</p>
-              </div>
-            );
-          })}
-        </div>
-
-        {stats.missing > 0 && (
-          <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300/25 bg-amber-400/10 px-4 py-3 text-xs text-amber-100/85">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <p>
-              {stats.missing} {stats.missing === 1 ? 'track is' : 'tracks are'} missing on disk.
-              Rescan the library to refresh the index, or remove the affected folder.
-            </p>
-          </div>
-        )}
-
-        <div className="rounded-[24px] bg-white/[0.045] border border-white/[0.1] p-5 space-y-4 flex-1">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-white/80">
-              <span className="font-medium">Master Output Volume</span>
-              <span className="font-mono-tabular text-white/60">{Math.round(volume * 100)}%</span>
-            </div>
-            <input
-              type="range"
-              aria-label="Master output volume"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-              className="w-full accent-white h-1.5 bg-white/20 rounded-full cursor-pointer"
-            />
-          </div>
-
-          <div className="border-t border-white/10 pt-4 space-y-2.5">
-            <h3 className="text-xs font-semibold text-white/85">Keyboard Shortcuts</h3>
-            <div className="grid grid-cols-2 gap-2 text-xs text-white/65">
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Play / Pause</span>
-                <kbd className="font-mono-tabular text-white/90">Space</kbd>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Seek 5s</span>
-                <kbd className="font-mono-tabular text-white/90">← / →</kbd>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Next / Prev</span>
-                <kbd className="font-mono-tabular text-white/90">N / P</kbd>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Like Track</span>
-                <kbd className="font-mono-tabular text-white/90">L</kbd>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Search</span>
-                <kbd className="font-mono-tabular text-white/90">⌘ / Ctrl F</kbd>
-              </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2">
-                <span>Back Home</span>
-                <kbd className="font-mono-tabular text-white/90">Esc</kbd>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsView
+        library={library}
+        settings={settings}
+        playlists={playlists}
+        volume={volume}
+        onVolumeChange={onVolumeChange}
+        onGoDiscover={onGoDiscover}
+      />
     );
   }
 
