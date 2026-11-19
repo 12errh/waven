@@ -7,9 +7,13 @@ import type {
   Artist,
   ArtistPage,
   Folder,
+  FolderImportResult,
   Genre,
+  LibraryDrop,
   LibraryStats,
   MixKind,
+  Playlist,
+  PlaylistImport,
   ScanProgress,
   ScanStatus,
   ScanSummary,
@@ -161,6 +165,11 @@ export function createFixtureApi() {
   let doneTimer: ReturnType<typeof setTimeout> | null = null;
   const progressListeners = new Set<(p: ScanProgress) => void>();
   const doneListeners = new Set<(s: ScanSummary) => void>();
+  const dropListeners = new Set<(drop: LibraryDrop) => void>();
+  const playlists: Playlist[] = [];
+  let playlistSeq = 0;
+  let legacyImported = false;
+  let playlistTimestamp = 1_760_000_000_000;
 
   function emitProgress(p: ScanProgress) {
     progress = p;
@@ -291,6 +300,18 @@ export function createFixtureApi() {
     return Array.from(map.entries())
       .map(([name, trackCount]) => ({ name, trackCount }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function presentTrackIds(ids: number[]): number[] {
+    const available = new Set(tracks.map((track) => track.id));
+    const seen = new Set<number>();
+    const result: number[] = [];
+    for (const id of ids) {
+      if (!available.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      result.push(id);
+    }
+    return result;
   }
 
   return {
@@ -432,6 +453,134 @@ export function createFixtureApi() {
       if (!track) return;
       track.durationMs = durationMs;
       track.durationSec = durationMs / 1000;
+    },
+    async getPlaylists(): Promise<Playlist[]> {
+      return playlists.map((playlist) => ({
+        ...playlist,
+        trackIds: [...playlist.trackIds],
+      }));
+    },
+    async createPlaylist(name: string, trackIds: number[]): Promise<Playlist> {
+      const clean = name.trim();
+      if (!clean) throw new Error('playlist name cannot be empty');
+      const ids = presentTrackIds(trackIds);
+      const now = ++playlistTimestamp;
+      const playlist: Playlist = {
+        id: ++playlistSeq,
+        name: clean,
+        trackIds: ids,
+        coverSrc: tracks.find((track) => ids.includes(track.id))?.coverSrc ?? '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      playlists.unshift(playlist);
+      return { ...playlist, trackIds: [...playlist.trackIds] };
+    },
+    async renamePlaylist(id: number, name: string): Promise<void> {
+      const clean = name.trim();
+      if (!clean) throw new Error('playlist name cannot be empty');
+      const playlist = playlists.find((entry) => entry.id === id);
+      if (!playlist) throw new Error('playlist not found');
+      playlist.name = clean;
+      playlist.updatedAt = ++playlistTimestamp;
+    },
+    async deletePlaylist(id: number): Promise<void> {
+      const index = playlists.findIndex((entry) => entry.id === id);
+      if (index === -1) throw new Error('playlist not found');
+      playlists.splice(index, 1);
+    },
+    async addTrackToPlaylist(id: number, trackId: number): Promise<void> {
+      const playlist = playlists.find((entry) => entry.id === id);
+      if (!playlist) throw new Error('playlist not found');
+      if (!tracks.some((track) => track.id === trackId)) {
+        throw new Error('track not found');
+      }
+      if (playlist.trackIds.includes(trackId)) return;
+      playlist.trackIds = [...playlist.trackIds, trackId];
+      playlist.coverSrc =
+        playlist.coverSrc || tracks.find((track) => track.id === trackId)?.coverSrc || '';
+      playlist.updatedAt = ++playlistTimestamp;
+    },
+    async removeFromPlaylist(id: number, trackId: number): Promise<void> {
+      const playlist = playlists.find((entry) => entry.id === id);
+      if (!playlist) throw new Error('playlist not found');
+      playlist.trackIds = playlist.trackIds.filter((entry) => entry !== trackId);
+      playlist.coverSrc = tracks.find((track) => playlist.trackIds.includes(track.id))?.coverSrc ?? '';
+      playlist.updatedAt = ++playlistTimestamp;
+    },
+    async reorderPlaylist(id: number, trackIds: number[]): Promise<void> {
+      const playlist = playlists.find((entry) => entry.id === id);
+      if (!playlist) throw new Error('playlist not found');
+      const current = [...playlist.trackIds].sort((a, b) => a - b);
+      const next = [...trackIds].sort((a, b) => a - b);
+      if (current.length !== next.length || current.some((trackId, index) => trackId !== next[index])) {
+        throw new Error('playlist reorder does not match the current tracks');
+      }
+      playlist.trackIds = [...trackIds];
+      playlist.updatedAt = ++playlistTimestamp;
+    },
+    async importPlaylists(imports: PlaylistImport[]): Promise<number> {
+      if (legacyImported) return 0;
+      legacyImported = true;
+      let imported = 0;
+      // Add oldest first so the newest legacy playlist still appears first.
+      const ordered = [...imports].sort((a, b) => a.createdAt - b.createdAt);
+      for (const entry of ordered) {
+        const clean = entry.name.trim();
+        if (!clean) continue;
+        const ids = presentTrackIds(entry.trackIds);
+        const created = entry.createdAt > 0 ? entry.createdAt : ++playlistTimestamp;
+        playlists.unshift({
+          id: ++playlistSeq,
+          name: clean,
+          trackIds: ids,
+          coverSrc: tracks.find((track) => ids.includes(track.id))?.coverSrc ?? '',
+          createdAt: created,
+          updatedAt: created,
+        });
+        imported += 1;
+      }
+      playlists.sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+      return imported;
+    },
+    async importDroppedPaths(paths: string[]): Promise<FolderImportResult> {
+      const result: FolderImportResult = {
+        folders: [],
+        added: [],
+        existing: [],
+        warnings: [],
+      };
+      for (const raw of paths) {
+        const clean = raw.replace(/[\\/]+$/, '');
+        if (!clean) {
+          result.warnings.push('a dropped path was empty');
+          continue;
+        }
+        if (folders.some((folder) => folder.path === clean || clean.startsWith(`${folder.path}/`))) {
+          result.existing.push(clean);
+          continue;
+        }
+        if (folders.some((folder) => folder.path.startsWith(`${clean}/`))) {
+          result.warnings.push(`${clean} overlaps an existing preview root`);
+          continue;
+        }
+        const folder: Folder = {
+          id: folders.reduce((max, entry) => Math.max(max, entry.id), 0) + 1,
+          path: clean,
+          createdAt: Date.now(),
+          lastScanAt: null,
+        };
+        folders.push(folder);
+        result.folders.push(folder);
+        result.added.push(clean);
+      }
+      const drop: LibraryDrop = { result, scanStarted: false };
+      for (const listener of dropListeners) listener(drop);
+      return result;
+    },
+    onLibraryDrop(listener: (drop: LibraryDrop) => void): () => void {
+      dropListeners.add(listener);
+      return () => dropListeners.delete(listener);
     },
     onScanProgress(listener: (p: ScanProgress) => void): () => void {
       progressListeners.add(listener);

@@ -180,10 +180,32 @@ export interface ScanStatus {
 }
 
 export interface Playlist {
-  id: string;
+  id: number;
   name: string;
-  description: string;
   trackIds: number[];
   coverSrc: string;
   createdAt: number;
+  updatedAt: number;
+}
+
+/** Shape accepted by the Go one-time playlist import. */
+export interface PlaylistImport {
+  name: string;
+  trackIds: number[];
+  createdAt: number;
+}
+
+/** Result of registering files or folders dropped onto the window. */
+export interface FolderImportResult {
+  folders: Folder[];
+  added: string[];
+  existing: string[];
+  warnings: string[];
+}
+
+/** Emitted by Go after a native file drop has been handled. */
+export interface LibraryDrop {
+  result: FolderImportResult;
+  error?: string;
+  scanStarted: boolean;
 }

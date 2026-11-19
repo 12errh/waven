@@ -1,4 +1,4 @@
-import type { Playlist, PlayerSession, RepeatMode, Track } from './types';
+import type { PlayerSession, RepeatMode, Track } from './types';
 
 /**
  * Formats seconds as MM:SS with zero-padded minutes and seconds (e.g. 00:43, 03:12).
@@ -355,35 +355,6 @@ export function groupTracksByAlbum(tracks: Track[]): Array<{
     coverSrc: albumTracks[0].coverSrc,
     tracks: albumTracks,
   }));
-}
-
-/**
- * Adds a track ID to a playlist without duplicating if already present.
- */
-export function addTrackToPlaylist(
-  playlists: Playlist[],
-  playlistId: string,
-  trackId: number
-): Playlist[] {
-  return playlists.map((pl) => {
-    if (pl.id !== playlistId) return pl;
-    if (pl.trackIds.includes(trackId)) return pl;
-    return { ...pl, trackIds: [...pl.trackIds, trackId] };
-  });
-}
-
-/**
- * Removes a track ID from a playlist.
- */
-export function removeTrackFromPlaylist(
-  playlists: Playlist[],
-  playlistId: string,
-  trackId: number
-): Playlist[] {
-  return playlists.map((pl) => {
-    if (pl.id !== playlistId) return pl;
-    return { ...pl, trackIds: pl.trackIds.filter((id) => id !== trackId) };
-  });
 }
 
 /**

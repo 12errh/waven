@@ -8,13 +8,13 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import type { DragEvent } from 'react';
 import { motion } from 'motion/react';
 import { AlertCircle, FolderPlus, Loader2, X } from 'lucide-react';
 import { PlayerEngine, type PlaybackError } from '@/lib/player-engine';
 import { getPlayerApi } from '@/lib/player-api';
 import { loadDesktopRuntime } from '@/lib/desktop-runtime';
 import {
-  addTrackToPlaylist,
   buildShuffleOrder,
   clampResumeSeconds,
   dedupeIds,
@@ -23,11 +23,10 @@ import {
   getPrevTrackId,
   normalizePlayerSession,
   playRecordThresholdSeconds,
-  removeTrackFromPlaylist,
 } from '@/lib/player-logic';
 import type {
   DockSection,
-  Playlist,
+  PlaylistImport,
   PlayerSession,
   RepeatMode,
   SearchResults,
@@ -46,34 +45,44 @@ import { FeaturedCardsRow } from './FeaturedCardsRow';
 import { LeftDock } from './LeftDock';
 import { NowPlayingCard } from './NowPlayingCard';
 import { SecondaryViews } from './SecondaryViews';
+import { useToast } from './ToastStack';
 import { TopPillNav } from './TopPillNav';
 import { TrackListPanel } from './TrackListPanel';
 
-const STORAGE_KEYS = {
-  playlists: 'waven_playlists_v2',
-};
+const LEGACY_PLAYLISTS_KEY = 'waven_playlists_v2';
 
 const EMPTY_SEARCH: SearchResults = { tracks: [], albums: [], artists: [] };
 
-function readPlaylists(): Playlist[] {
+/**
+ * Reads the pre-SQLite localStorage playlists once so they can be imported by
+ * the Go store. The store keeps its own marker, so calling this on every launch
+ * is safe and only the first import creates rows.
+ */
+function readLegacyPlaylists(): PlaylistImport[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.playlists);
+    const raw = window.localStorage.getItem(LEGACY_PLAYLISTS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (entry): entry is Playlist =>
-          Boolean(entry) &&
-          typeof (entry as Playlist).id === 'string' &&
-          typeof (entry as Playlist).name === 'string' &&
-          Array.isArray((entry as Playlist).trackIds)
-      )
-      .map((entry) => ({
-        ...entry,
-        trackIds: entry.trackIds.filter((id): id is number => typeof id === 'number'),
-      }));
+    const imports: PlaylistImport[] = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      const name = typeof record.name === 'string' ? record.name.trim() : '';
+      if (!name) continue;
+      const trackIds = Array.isArray(record.trackIds)
+        ? record.trackIds.filter(
+            (id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0
+          )
+        : [];
+      const createdAt =
+        typeof record.createdAt === 'number' && Number.isFinite(record.createdAt)
+          ? record.createdAt
+          : 0;
+      imports.push({ name, trackIds, createdAt });
+    }
+    return imports;
   } catch {
     return [];
   }
@@ -89,7 +98,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function WavenPlayer() {
   const library = useLibrary();
   const settings = useSettings();
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const { notify } = useToast();
+  const playlists = library.playlists;
 
   const [dockSection, setDockSection] = useState<DockSection>('home');
   const [topTab, setTopTab] = useState<TopTab>('Discover');
@@ -113,7 +123,6 @@ export function WavenPlayer() {
     query: string;
     results: SearchResults;
   } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const windowMode = useSyncExternalStore(
     subscribeWindowMode,
@@ -220,23 +229,23 @@ export function WavenPlayer() {
     });
   }, []);
 
+  // Move pre-SQLite localStorage playlists into the library once the desktop
+  // store is reachable. The store records its own marker, so a failed or
+  // repeated run never duplicates rows.
+  const importLegacyPlaylists = library.importLegacyPlaylists;
   useEffect(() => {
-    // Hydrate persisted playlists after mount so the statically exported HTML
-    // and the first client render stay identical.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPlaylists(readPlaylists());
-  }, []);
-
-  useEffect(() => {
-    // Wait for the playlist read above so the initial empty state never
-    // overwrites saved playlists in storage.
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(STORAGE_KEYS.playlists, JSON.stringify(playlists));
-    } catch {
-      // ignore storage failures
-    }
-  }, [playlists]);
+    if (!library.ready) return;
+    const legacy = readLegacyPlaylists();
+    if (legacy.length === 0) return;
+    void importLegacyPlaylists(legacy).then((count) => {
+      if (count <= 0) return;
+      try {
+        window.localStorage.removeItem(LEGACY_PLAYLISTS_KEY);
+      } catch {
+        // The store marker already prevents duplicates; a failed cleanup is safe.
+      }
+    });
+  }, [library.ready, importLegacyPlaylists]);
 
   // Bring up the Wails runtime as soon as the interface mounts. This announces
   // the page to the Go shell, which enables the native drag region and lets the
@@ -820,27 +829,63 @@ export function WavenPlayer() {
     [applyPlaying, persistSession, playById]
   );
 
-  const handleAddToPlaylist = useCallback((playlistId: string, trackId: number) => {
-    setPlaylists((prev) => addTrackToPlaylist(prev, playlistId, trackId));
-  }, []);
+  const handleAddToPlaylist = useCallback(
+    (playlistId: number, trackId: number) => {
+      void library.addTrackToPlaylist(playlistId, trackId).then((ok) => {
+        if (!ok) return;
+        const playlist = library.playlists.find((entry) => entry.id === playlistId);
+        const track = library.resolveTrack(trackId);
+        notify(
+          playlist
+            ? `Added ${track ? `“${track.title}”` : 'track'} to ${playlist.name}.`
+            : 'Added to playlist.',
+          'success'
+        );
+      });
+    },
+    [library, notify]
+  );
 
-  const handleRemoveFromPlaylist = useCallback((playlistId: string, trackId: number) => {
-    setPlaylists((prev) => removeTrackFromPlaylist(prev, playlistId, trackId));
-  }, []);
+  const handleRemoveFromPlaylist = useCallback(
+    (playlistId: number, trackId: number) => {
+      void library.removeFromPlaylist(playlistId, trackId);
+    },
+    [library]
+  );
 
   const handleCreatePlaylist = useCallback(
-    (name: string, description: string) => {
-      const newPlaylist: Playlist = {
-        id: `pl-${Date.now()}`,
-        name,
-        description,
-        trackIds: currentTrack ? [currentTrack.id] : [],
-        coverSrc: currentTrack?.coverSrc ?? '',
-        createdAt: Date.now(),
-      };
-      setPlaylists((prev) => [newPlaylist, ...prev]);
+    (name: string) => {
+      void library.createPlaylist(name).then((playlist) => {
+        if (playlist) notify(`Created playlist “${playlist.name}”.`, 'success');
+      });
     },
-    [currentTrack]
+    [library, notify]
+  );
+
+  const handleRenamePlaylist = useCallback(
+    (playlistId: number, name: string) => {
+      void library.renamePlaylist(playlistId, name).then((ok) => {
+        if (ok) notify(`Renamed playlist to “${name.trim()}”.`, 'success');
+      });
+    },
+    [library, notify]
+  );
+
+  const handleDeletePlaylist = useCallback(
+    (playlistId: number) => {
+      const playlist = library.playlists.find((entry) => entry.id === playlistId);
+      void library.deletePlaylist(playlistId).then((ok) => {
+        if (ok) notify(playlist ? `Deleted “${playlist.name}”.` : 'Playlist deleted.', 'success');
+      });
+    },
+    [library, notify]
+  );
+
+  const handleReorderPlaylist = useCallback(
+    (playlistId: number, trackIds: number[]) => {
+      void library.reorderPlaylist(playlistId, trackIds);
+    },
+    [library]
   );
 
   // Tray transport commands. The refs keep the listeners mounted once while
@@ -934,17 +979,44 @@ export function WavenPlayer() {
           ? `Scan complete — ${parts.join(', ')}.`
           : 'Scan complete. No changes found.';
     }
-    // A completed scan is an external event; this effect mirrors it into the
-    // toast queue rather than deriving render state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNotice(message);
-  }, [lastScan]);
+    notify(message, lastScan.errors.length > 0 ? 'info' : 'success');
+  }, [lastScan, notify]);
 
+  // Native file drops import folders through the backend; report the outcome
+  // and clear the pending drop so it cannot fire twice.
+  const drop = library.drop;
+  const clearDrop = library.clearDrop;
   useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 6500);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
+    if (!drop) return;
+    if (drop.error) {
+      notify(drop.error, 'error');
+    } else {
+      const result = drop.result;
+      const addedCount = result?.added.length ?? 0;
+      const existingCount = result?.existing.length ?? 0;
+      const warningCount = result?.warnings.length ?? 0;
+      const parts = [
+        addedCount > 0 ? `${addedCount} folder${addedCount === 1 ? '' : 's'} added` : '',
+        existingCount > 0 ? `${existingCount} already in your library` : '',
+        warningCount > 0 ? `${warningCount} path${warningCount === 1 ? '' : 's'} skipped` : '',
+      ].filter(Boolean);
+      notify(
+        parts.length > 0 ? `Drop complete — ${parts.join(', ')}.` : 'Nothing new to import.',
+        addedCount > 0 ? 'success' : 'info'
+      );
+    }
+    clearDrop();
+  }, [drop, clearDrop, notify]);
+
+  // Library-level failures (scan, playlist writes, likes) surface as toasts so
+  // they are noticed wherever the user is in the app.
+  const libraryError = library.error;
+  const clearLibraryError = library.clearError;
+  useEffect(() => {
+    if (!libraryError) return;
+    notify(libraryError, 'error');
+    clearLibraryError();
+  }, [libraryError, clearLibraryError, notify]);
 
   // Debounced local-library search. The backend normalizes accents and ranks
   // title/artist prefix matches ahead of substring matches. Results are keyed by
@@ -1047,6 +1119,26 @@ export function WavenPlayer() {
     return engineRef.current?.readAnalyser(target) ?? false;
   }, []);
 
+  // The Wails runtime handles native drops; these guards keep a stray browser
+  // drop from navigating the webview, and explain the preview limitation.
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      if (!library.preview) return;
+      notify(
+        'Folder drops work in the desktop app. Use Add folder in the Library tab here.',
+        'info'
+      );
+    },
+    [library.preview, notify]
+  );
+
   const featuredTracks = useMemo(() => library.recent.slice(0, 3), [library.recent]);
 
   const isCurrentLiked =
@@ -1057,8 +1149,25 @@ export function WavenPlayer() {
   return (
     <div
       data-window-mode={windowMode}
+      data-file-drop-target="waven-library"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       className="waven-app relative min-h-screen w-full flex items-center justify-center px-3 py-4 sm:px-6 lg:px-10 pb-24 lg:pb-10 overflow-x-hidden"
     >
+      {/* Drop affordance. The Wails runtime toggles .file-drop-target-active on
+          this element while files hover the window. */}
+      <div
+        aria-hidden="true"
+        className="waven-drop-overlay pointer-events-none fixed inset-0 z-[75] items-center justify-center p-6"
+      >
+        <div className="flex flex-col items-center gap-2 rounded-[28px] border border-dashed border-white/30 bg-[#0b0e15]/88 px-10 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
+          <FolderPlus className="h-8 w-8 text-white/80" />
+          <p className="font-display text-sm font-semibold text-white">Drop folders to add them</p>
+          <p className="text-xs text-white/55">
+            Files join their parent folder, then scan into your library.
+          </p>
+        </div>
+      </div>
       {/* Ambient Atmospheric Backdrop mirroring current cover */}
       <div
         aria-hidden="true"
@@ -1274,6 +1383,9 @@ export function WavenPlayer() {
                   onAddToPlaylist={handleAddToPlaylist}
                   onRemoveFromPlaylist={handleRemoveFromPlaylist}
                   onCreatePlaylist={handleCreatePlaylist}
+                  onRenamePlaylist={handleRenamePlaylist}
+                  onDeletePlaylist={handleDeletePlaylist}
+                  onReorderPlaylist={handleReorderPlaylist}
                   onRemoveFromQueue={handleRemoveFromQueue}
                   onVolumeChange={handleVolumeChange}
                   onNavigate={handleNavigate}
@@ -1316,73 +1428,39 @@ export function WavenPlayer() {
             </div>
           </div>
 
-          {(library.error || playbackError || notice) && (
+          {playbackError && (
             <div className="mt-4 flex flex-col gap-2">
-              {library.error && (
-                <div className="flex items-center justify-between gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-2.5 text-xs text-rose-100">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{library.error}</span>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Dismiss error"
-                    onClick={library.clearError}
-                    className="shrink-0 text-rose-100/70 hover:text-white"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-              {playbackError && (
-                <div
-                  role="alert"
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-400/10 px-4 py-2.5 text-xs text-amber-50"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{playbackError.message}</span>
-                  </span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {playbackError.code !== 'blocked' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPlaybackError(null);
-                          handleNext(false);
-                        }}
-                        className="rounded-full border border-amber-200/30 bg-amber-200/10 px-2.5 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-200/20"
-                      >
-                        Skip
-                      </button>
-                    )}
+              <div
+                role="alert"
+                className="flex items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-400/10 px-4 py-2.5 text-xs text-amber-50"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{playbackError.message}</span>
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {playbackError.code !== 'blocked' && (
                     <button
                       type="button"
-                      aria-label="Dismiss playback message"
-                      onClick={() => setPlaybackError(null)}
-                      className="text-amber-100/70 hover:text-white"
+                      onClick={() => {
+                        setPlaybackError(null);
+                        handleNext(false);
+                      }}
+                      className="rounded-full border border-amber-200/30 bg-amber-200/10 px-2.5 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-200/20"
                     >
-                      <X className="w-4 h-4" />
+                      Skip
                     </button>
-                  </div>
-                </div>
-              )}
-              {notice && (
-                <div
-                  role="status"
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-white/12 bg-white/[0.08] px-4 py-2.5 text-xs text-white/85"
-                >
-                  <span className="truncate">{notice}</span>
+                  )}
                   <button
                     type="button"
-                    aria-label="Dismiss message"
-                    onClick={() => setNotice(null)}
-                    className="shrink-0 text-white/60 hover:text-white"
+                    aria-label="Dismiss playback message"
+                    onClick={() => setPlaybackError(null)}
+                    className="text-amber-100/70 hover:text-white"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-              )}
+              </div>
             </div>
           )}
         </motion.main>

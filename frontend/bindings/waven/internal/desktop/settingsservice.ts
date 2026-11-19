@@ -28,6 +28,8 @@ export function Get(): $CancellablePromise<$models.AppSettings> {
 
 /**
  * Update writes all user-editable settings and applies the autostart entry.
+ * If the login item cannot be written, the previous settings are restored so
+ * the database never claims autostart is on when it is not.
  */
 export function Update(next: $models.AppSettings): $CancellablePromise<$models.AppSettings> {
     return $Call.ByID(3184707754, next).then(($result: any) => {

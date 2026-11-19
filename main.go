@@ -73,7 +73,7 @@ func main() {
 	}
 	app.RegisterService(application.NewService(settingsService))
 
-	shell = desktop.New(app, settingsService, startHidden)
+	shell = desktop.New(app, settingsService, libraryService, startHidden)
 	playerService, err := desktop.NewPlayerService(app, libraryService, shell)
 	if err != nil {
 		log.Fatal(err)

@@ -43,7 +43,7 @@ interface NowPlayingCardProps {
   onCycleRepeat: () => void;
   onVolumeChange: (vol: number) => void;
   onToggleMute: () => void;
-  onAddToPlaylist: (playlistId: string, trackId: number) => void;
+  onAddToPlaylist: (playlistId: number, trackId: number) => void;
   onOpenQueue: () => void;
   onOpenLibrary: () => void;
   readAnalyser: (target: Uint8Array) => boolean;

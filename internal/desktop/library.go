@@ -7,9 +7,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -150,6 +152,33 @@ type ScanStatus struct {
 	Running  bool                 `json:"running"`
 	Progress library.Progress     `json:"progress"`
 	Last     *library.ScanSummary `json:"last,omitempty"`
+}
+
+// Playlist is the frontend-facing ordered collection.
+type Playlist struct {
+	ID        int64   `json:"id"`
+	Name      string  `json:"name"`
+	TrackIDs  []int64 `json:"trackIds"`
+	CoverSrc  string  `json:"coverSrc"`
+	CreatedAt int64   `json:"createdAt"`
+	UpdatedAt int64   `json:"updatedAt"`
+}
+
+// PlaylistImport is one legacy localStorage playlist offered by the frontend.
+type PlaylistImport struct {
+	Name      string  `json:"name"`
+	TrackIDs  []int64 `json:"trackIds"`
+	CreatedAt int64   `json:"createdAt"`
+}
+
+// FolderImportResult reports what happened to files and folders dropped onto
+// the window. Warnings let the UI surface per-path problems without failing the
+// whole drop.
+type FolderImportResult struct {
+	Folders  []store.Folder `json:"folders"`
+	Added    []string       `json:"added"`
+	Existing []string       `json:"existing"`
+	Warnings []string       `json:"warnings"`
 }
 
 // NewLibraryService opens the database, artwork cache, and media server using
@@ -656,6 +685,185 @@ func (s *LibraryService) GetStats() (LibraryStats, error) {
 	}, nil
 }
 
+// GetPlaylists returns every playlist with its ordered track IDs.
+func (s *LibraryService) GetPlaylists() ([]Playlist, error) {
+	rows, err := s.store.ListPlaylists()
+	if err != nil {
+		return nil, err
+	}
+	playlists := make([]Playlist, 0, len(rows))
+	for _, row := range rows {
+		playlists = append(playlists, s.toPlaylist(row))
+	}
+	return playlists, nil
+}
+
+// CreatePlaylist creates a playlist and optionally seeds it with tracks.
+func (s *LibraryService) CreatePlaylist(name string, trackIDs []int64) (Playlist, error) {
+	clean, err := playlistName(name)
+	if err != nil {
+		return Playlist{}, err
+	}
+	row, err := s.store.CreatePlaylist(clean, trackIDs, 0)
+	if err != nil {
+		return Playlist{}, err
+	}
+	return s.toPlaylist(row), nil
+}
+
+// RenamePlaylist updates a playlist name.
+func (s *LibraryService) RenamePlaylist(id int64, name string) error {
+	clean, err := playlistName(name)
+	if err != nil {
+		return err
+	}
+	return s.store.RenamePlaylist(id, clean)
+}
+
+// DeletePlaylist removes a playlist. Tracks and files are untouched.
+func (s *LibraryService) DeletePlaylist(id int64) error {
+	return s.store.DeletePlaylist(id)
+}
+
+// AddTrackToPlaylist appends a track if it is not already in the playlist.
+func (s *LibraryService) AddTrackToPlaylist(id, trackID int64) error {
+	return s.store.AddPlaylistTrack(id, trackID)
+}
+
+// RemoveFromPlaylist removes a track from a playlist.
+func (s *LibraryService) RemoveFromPlaylist(id, trackID int64) error {
+	return s.store.RemovePlaylistTrack(id, trackID)
+}
+
+// ReorderPlaylist rewrites the track order. The frontend sends the complete
+// list so stored positions always match what the user sees.
+func (s *LibraryService) ReorderPlaylist(id int64, trackIDs []int64) error {
+	return s.store.ReorderPlaylistTracks(id, trackIDs)
+}
+
+// ImportPlaylists performs the one-time import of the old localStorage
+// playlists. The store keeps a marker so relaunching cannot duplicate them.
+func (s *LibraryService) ImportPlaylists(imports []PlaylistImport) (int, error) {
+	clean := make([]store.PlaylistImport, 0, len(imports))
+	for _, entry := range imports {
+		name, err := playlistName(entry.Name)
+		if err != nil {
+			continue
+		}
+		clean = append(clean, store.PlaylistImport{
+			Name:      name,
+			TrackIDs:  entry.TrackIDs,
+			CreatedAt: entry.CreatedAt,
+		})
+	}
+	return s.store.ImportLegacyPlaylists(clean)
+}
+
+// ImportDroppedPaths registers the folders behind a native file drop. Dropped
+// files contribute their parent directory because the library is folder based.
+// The frontend starts the scan after this returns so one drop means one scan.
+func (s *LibraryService) ImportDroppedPaths(paths []string) (FolderImportResult, error) {
+	result := FolderImportResult{
+		Folders:  []store.Folder{},
+		Added:    []string{},
+		Existing: []string{},
+		Warnings: []string{},
+	}
+	if len(paths) == 0 {
+		return result, errors.New("no files or folders were dropped")
+	}
+
+	candidates := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, raw := range paths {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		clean, err := library.NormalizePath(raw)
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %v", raw, err))
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+			clean = resolved
+		}
+		info, err := os.Stat(clean)
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s is not accessible", clean))
+			continue
+		}
+		if !info.IsDir() {
+			clean = filepath.Dir(clean)
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		candidates = append(candidates, clean)
+	}
+	if len(candidates) == 0 {
+		return result, nil
+	}
+
+	// Keep only the outermost roots: dropping a folder and a file inside it
+	// must register one root, not a nested pair.
+	roots := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		covered := false
+		for _, other := range candidates {
+			if other != candidate && pathInside(other, candidate) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			roots = append(roots, candidate)
+		}
+	}
+	sort.Strings(roots)
+
+	folders, err := s.store.ListFolders()
+	if err != nil {
+		return result, err
+	}
+	for _, root := range roots {
+		exact := false
+		covered := false
+		conflict := ""
+		for _, folder := range folders {
+			switch {
+			case folder.Path == root:
+				exact = true
+			case pathInside(folder.Path, root):
+				covered = true
+			case pathInside(root, folder.Path):
+				conflict = folder.Path
+			}
+			if exact || covered || conflict != "" {
+				break
+			}
+		}
+		if exact || covered {
+			result.Existing = append(result.Existing, root)
+			continue
+		}
+		if conflict != "" {
+			result.Warnings = append(result.Warnings, fmt.Sprintf(
+				"%s overlaps the existing library root %q; remove that root first", root, conflict))
+			continue
+		}
+		folder, err := s.store.AddFolder(root)
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %v", root, err))
+			continue
+		}
+		folders = append(folders, folder)
+		result.Folders = append(result.Folders, folder)
+		result.Added = append(result.Added, root)
+	}
+	return result, nil
+}
+
 // SetLiked persists a heart toggle.
 func (s *LibraryService) SetLiked(id int64, liked bool) error {
 	return s.store.SetLiked(id, liked)
@@ -717,14 +925,43 @@ func searchRank(t Track, text string) int {
 }
 
 func pathsOverlap(a, b string) bool {
-	inside := func(parent, child string) bool {
-		rel, err := filepath.Rel(parent, child)
-		if err != nil {
-			return false
-		}
-		return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	return pathInside(a, b) || pathInside(b, a)
+}
+
+// pathInside reports whether child is parent itself or lives below it.
+func pathInside(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
 	}
-	return inside(a, b) || inside(b, a)
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// playlistName trims and validates a user-supplied playlist name.
+func playlistName(name string) (string, error) {
+	clean := strings.TrimSpace(name)
+	if clean == "" {
+		return "", errors.New("playlist name cannot be empty")
+	}
+	if utf8.RuneCountInString(clean) > 80 {
+		return "", errors.New("playlist name cannot be longer than 80 characters")
+	}
+	return clean, nil
+}
+
+func (s *LibraryService) toPlaylist(row store.Playlist) Playlist {
+	trackIDs := row.TrackIDs
+	if trackIDs == nil {
+		trackIDs = []int64{}
+	}
+	return Playlist{
+		ID:        row.ID,
+		Name:      row.Name,
+		TrackIDs:  trackIDs,
+		CoverSrc:  s.media.ArtURL(row.CoverArtID),
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
 }
 
 func appendCapped[T any](values []T, value T) []T {

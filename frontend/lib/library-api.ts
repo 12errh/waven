@@ -7,9 +7,13 @@ import type {
   AlbumPage,
   ArtistPage,
   Folder,
+  FolderImportResult,
   Genre,
+  LibraryDrop,
   LibraryStats,
   MixKind,
+  Playlist,
+  PlaylistImport,
   ScanProgress,
   ScanStatus,
   ScanSummary,
@@ -44,6 +48,18 @@ export interface LibraryApi {
   getTrack(id: number): Promise<Track>;
   search(query: string, limit: number): Promise<SearchResults>;
   setDuration(id: number, durationMs: number): Promise<void>;
+  getPlaylists(): Promise<Playlist[]>;
+  createPlaylist(name: string, trackIds: number[]): Promise<Playlist>;
+  renamePlaylist(id: number, name: string): Promise<void>;
+  deletePlaylist(id: number): Promise<void>;
+  addTrackToPlaylist(id: number, trackId: number): Promise<void>;
+  removeFromPlaylist(id: number, trackId: number): Promise<void>;
+  reorderPlaylist(id: number, trackIds: number[]): Promise<void>;
+  /** One-time migration from the old localStorage playlists. */
+  importPlaylists(imports: PlaylistImport[]): Promise<number>;
+  /** Register dropped files/folders. The Go shell also calls this on drop. */
+  importDroppedPaths(paths: string[]): Promise<FolderImportResult>;
+  onLibraryDrop(listener: (drop: LibraryDrop) => void): () => void;
   onScanProgress(listener: (progress: ScanProgress) => void): () => void;
   onScanDone(listener: (summary: ScanSummary) => void): () => void;
 }
@@ -69,6 +85,17 @@ function createDesktopApi(): LibraryApi {
     getTrack: (id) => Bindings.GetTrack(id),
     search: (query, limit) => Bindings.Search(query, limit),
     setDuration: (id, durationMs) => Bindings.SetDuration(id, durationMs),
+    getPlaylists: () => Bindings.GetPlaylists(),
+    createPlaylist: (name, trackIds) => Bindings.CreatePlaylist(name, trackIds),
+    renamePlaylist: (id, name) => Bindings.RenamePlaylist(id, name),
+    deletePlaylist: (id) => Bindings.DeletePlaylist(id),
+    addTrackToPlaylist: (id, trackId) => Bindings.AddTrackToPlaylist(id, trackId),
+    removeFromPlaylist: (id, trackId) => Bindings.RemoveFromPlaylist(id, trackId),
+    reorderPlaylist: (id, trackIds) => Bindings.ReorderPlaylist(id, trackIds),
+    importPlaylists: (imports) => Bindings.ImportPlaylists(imports),
+    importDroppedPaths: (paths) => Bindings.ImportDroppedPaths(paths),
+    onLibraryDrop: (listener) =>
+      Events.On('library:drop', (event) => listener(event.data as LibraryDrop)),
     onScanProgress: (listener) =>
       Events.On('scan:progress', (event) => listener(event.data as ScanProgress)),
     onScanDone: (listener) =>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   AlertTriangle,
+  Check,
   Clock3,
   Disc3,
   FolderOpen,
@@ -13,11 +14,12 @@ import {
   ListMusic,
   Loader2,
   Music2,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
-  Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -40,6 +42,7 @@ import type { LibraryController } from '@/lib/use-library';
 import type { SettingsController } from '@/lib/use-settings';
 import { CoverImage } from './CoverImage';
 import { LibraryFoldersPanel } from './LibraryFoldersPanel';
+import { SearchView } from './SearchView';
 import { SettingsView } from './SettingsView';
 import { TrackListPanel } from './TrackListPanel';
 
@@ -61,9 +64,12 @@ interface SecondaryViewsProps {
   onPlayTrack: (track: Track, customQueue?: Track[]) => void;
   onToggleLike: (trackId: number) => void;
   onAddToQueue: (track: Track) => void;
-  onAddToPlaylist: (playlistId: string, trackId: number) => void;
-  onRemoveFromPlaylist: (playlistId: string, trackId: number) => void;
-  onCreatePlaylist: (name: string, description: string) => void;
+  onAddToPlaylist: (playlistId: number, trackId: number) => void;
+  onRemoveFromPlaylist: (playlistId: number, trackId: number) => void;
+  onCreatePlaylist: (name: string) => void;
+  onRenamePlaylist: (playlistId: number, name: string) => void;
+  onDeletePlaylist: (playlistId: number) => void;
+  onReorderPlaylist: (playlistId: number, trackIds: number[]) => void;
   onRemoveFromQueue: (trackId: number) => void;
   onVolumeChange: (vol: number) => void;
   onNavigate: (section: DockSection, tab?: TopTab) => void;
@@ -91,14 +97,20 @@ export function SecondaryViews({
   onAddToPlaylist,
   onRemoveFromPlaylist,
   onCreatePlaylist,
+  onRenamePlaylist,
+  onDeletePlaylist,
+  onReorderPlaylist,
   onRemoveFromQueue,
   onVolumeChange,
   onNavigate,
   onGoDiscover,
 }: SecondaryViewsProps) {
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [renamingPlaylist, setRenamingPlaylist] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
@@ -295,119 +307,30 @@ export function SecondaryViews({
 
   // 1. SEARCH VIEW
   if (dockSection === 'search') {
-    const query = searchQuery.trim();
-    const songs = query ? searchResults.tracks : library.recent;
-    const searchAlbums = query ? searchResults.albums : [];
-    const searchArtists = query ? searchResults.artists : [];
-
     return (
-      <div className="flex flex-col gap-4 h-full">
-        <div className="rounded-[22px] bg-white/[0.06] border border-white/[0.12] px-4 py-3 flex items-center gap-3">
-          <Search className="w-4 h-4 text-white/60 shrink-0" />
-          <label htmlFor="waven-global-search" className="sr-only">
-            Search songs, artists, or albums
-          </label>
-          <input
-            id="waven-global-search"
-            type="search"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search your library..."
-            className="w-full bg-transparent text-sm text-white placeholder:text-white/45 focus:outline-none"
-          />
-          {searchLoading && <Loader2 className="w-4 h-4 text-white/60 animate-spin shrink-0" />}
-        </div>
-
-        <div className="flex items-center justify-between px-1">
-          <h2 className="font-display text-sm font-semibold text-white/90">
-            {query ? `Results for "${searchQuery}"` : 'Recently added'}
-          </h2>
-          <span className="text-xs text-white/50 font-mono-tabular">
-            {songs.length} {songs.length === 1 ? 'track' : 'tracks'}
-          </span>
-        </div>
-
-        {searchAlbums.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="px-1 text-[11px] font-medium uppercase tracking-wider text-white/45">
-              Albums
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {searchAlbums.slice(0, 6).map((album) => (
-                <button
-                  key={album.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedAlbum(album);
-                    onNavigate('home', 'Albums');
-                  }}
-                  className="flex items-center gap-3 p-2.5 rounded-2xl border bg-white/[0.045] border-white/[0.08] hover:bg-white/[0.08] text-left transition-colors"
-                >
-                  <CoverImage
-                    src={album.coverSrc}
-                    alt={album.album}
-                    className="w-10 h-10 rounded-xl object-cover shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-white truncate">{album.album}</p>
-                    <p className="text-[11px] text-white/55 truncate">{album.albumArtist}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {searchArtists.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="px-1 text-[11px] font-medium uppercase tracking-wider text-white/45">
-              Artists
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {searchArtists.slice(0, 6).map((artist) => (
-                <button
-                  key={artist.name}
-                  type="button"
-                  onClick={() => {
-                    setSelectedArtist(artist);
-                    onNavigate('home', 'Artists');
-                  }}
-                  className="flex items-center gap-3 p-2.5 rounded-2xl border bg-white/[0.045] border-white/[0.08] hover:bg-white/[0.08] text-left transition-colors"
-                >
-                  <CoverImage
-                    src={artist.coverSrc}
-                    alt={artist.name}
-                    className="w-10 h-10 rounded-full object-cover shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-white truncate">{artist.name}</p>
-                    <p className="text-[11px] text-white/55">
-                      {artist.trackCount} {artist.trackCount === 1 ? 'track' : 'tracks'}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <TrackListPanel
-          tracks={songs}
-          currentTrackId={currentTrackId}
-          isPlaying={isPlaying}
-          likedIds={likedIds}
-          playlists={playlists}
-          onPlayTrack={(track) => onPlayTrack(track, songs)}
-          onToggleLike={onToggleLike}
-          onAddToQueue={onAddToQueue}
-          onAddToPlaylist={onAddToPlaylist}
-          emptyMessage={
-            query
-              ? 'No matching songs found. Try another artist, album, or title.'
-              : 'Your library is empty. Add a music folder in the Library tab.'
-          }
-        />
-      </div>
+      <SearchView
+        library={library}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        searchLoading={searchLoading}
+        currentTrackId={currentTrackId}
+        isPlaying={isPlaying}
+        likedIds={likedIds}
+        playlists={playlists}
+        onSearchChange={onSearchChange}
+        onPlayTrack={onPlayTrack}
+        onToggleLike={onToggleLike}
+        onAddToQueue={onAddToQueue}
+        onAddToPlaylist={onAddToPlaylist}
+        onOpenAlbum={(album) => {
+          setSelectedAlbum(album);
+          onNavigate('home', 'Albums');
+        }}
+        onOpenArtist={(artist) => {
+          setSelectedArtist(artist);
+          onNavigate('home', 'Artists');
+        }}
+      />
     );
   }
 
@@ -544,12 +467,39 @@ export function SecondaryViews({
 
   // 5. PLAYLISTS TAB
   if (topTab === 'Playlists') {
-    const handleCreate = (e: FormEvent) => {
-      e.preventDefault();
-      if (!newPlaylistName.trim()) return;
-      onCreatePlaylist(newPlaylistName.trim(), 'Custom collection');
+    const handleCreate = (event: FormEvent) => {
+      event.preventDefault();
+      const name = newPlaylistName.trim();
+      if (!name) return;
+      onCreatePlaylist(name);
       setNewPlaylistName('');
       setCreatingPlaylist(false);
+    };
+
+    const beginRename = () => {
+      if (!activePlaylist) return;
+      setRenameValue(activePlaylist.name);
+      setRenamingPlaylist(true);
+      setConfirmingDelete(false);
+    };
+
+    const submitRename = (event: FormEvent) => {
+      event.preventDefault();
+      if (!activePlaylist) return;
+      const name = renameValue.trim();
+      if (!name) return;
+      onRenamePlaylist(activePlaylist.id, name);
+      setRenamingPlaylist(false);
+    };
+
+    const moveTrack = (trackId: number, direction: -1 | 1) => {
+      if (!activePlaylist) return;
+      const ids = [...activePlaylist.trackIds];
+      const index = ids.indexOf(trackId);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= ids.length) return;
+      [ids[index], ids[next]] = [ids[next], ids[index]];
+      onReorderPlaylist(activePlaylist.id, ids);
     };
 
     return (
@@ -563,7 +513,11 @@ export function SecondaryViews({
                 <button
                   key={pl.id}
                   type="button"
-                  onClick={() => setSelectedPlaylistId(pl.id)}
+                  onClick={() => {
+                    setSelectedPlaylistId(pl.id);
+                    setRenamingPlaylist(false);
+                    setConfirmingDelete(false);
+                  }}
                   className={cn(
                     'px-3.5 py-2 rounded-full text-xs font-medium border transition-colors whitespace-nowrap shrink-0',
                     activePlaylist?.id === pl.id
@@ -597,44 +551,137 @@ export function SecondaryViews({
               aria-label="Playlist name"
               placeholder="Playlist name (e.g. Evening Drive)"
               value={newPlaylistName}
+              maxLength={80}
               onChange={(e) => setNewPlaylistName(e.target.value)}
               className="flex-1 bg-transparent text-xs text-white placeholder:text-white/45 focus:outline-none px-2"
             />
             <button
               type="submit"
-              className="px-3.5 py-1.5 rounded-full bg-white text-[#0a0c12] text-xs font-semibold whitespace-nowrap"
+              disabled={!newPlaylistName.trim()}
+              className="px-3.5 py-1.5 rounded-full bg-white text-[#0a0c12] text-xs font-semibold whitespace-nowrap disabled:opacity-40"
             >
               Create
             </button>
           </form>
         )}
 
+        {playlists.length === 0 && !creatingPlaylist && (
+          <div className="rounded-[24px] bg-white/[0.045] border border-white/[0.1] px-6 py-10 text-center">
+            <ListMusic className="mx-auto h-7 w-7 text-white/40" />
+            <h2 className="mt-3 font-display text-sm font-semibold text-white">
+              Build your first playlist
+            </h2>
+            <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-white/50">
+              Playlists live in your local database. Create one here, then add songs from any
+              track menu.
+            </p>
+          </div>
+        )}
+
         {activePlaylist && (
-          <div className="rounded-[22px] bg-white/[0.05] border border-white/[0.1] p-3.5 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <CoverImage
-                src={playlistTracks[0]?.coverSrc || activePlaylist.coverSrc}
-                alt={activePlaylist.name}
-                className="w-12 h-12 rounded-2xl object-cover shrink-0"
-              />
-              <div className="min-w-0">
-                <h2 className="font-display text-base font-semibold text-white truncate">
-                  {activePlaylist.name}
-                </h2>
-                <p className="text-xs text-white/55 truncate">
-                  {playlistTracks.length} songs · {activePlaylist.description}
-                </p>
+          <div className="rounded-[22px] bg-white/[0.05] border border-white/[0.1] p-3.5">
+            {renamingPlaylist ? (
+              <form onSubmit={submitRename} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  aria-label="Rename playlist"
+                  value={renameValue}
+                  maxLength={80}
+                  autoFocus
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+                />
+                <button
+                  type="submit"
+                  aria-label="Save playlist name"
+                  disabled={!renameValue.trim()}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#090b10] disabled:opacity-40"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Cancel rename"
+                  onClick={() => setRenamingPlaylist(false)}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 text-white/70 hover:bg-white/10"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <CoverImage
+                    src={playlistTracks[0]?.coverSrc || activePlaylist.coverSrc}
+                    alt={activePlaylist.name}
+                    className="w-12 h-12 rounded-2xl object-cover shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <h2 className="font-display text-base font-semibold text-white truncate">
+                      {activePlaylist.name}
+                    </h2>
+                    <p className="text-xs text-white/55 truncate">
+                      {playlistTracks.length} {playlistTracks.length === 1 ? 'song' : 'songs'} ·
+                      Updated {formatRelativeTime(activePlaylist.updatedAt)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {playlistTracks.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onPlayTrack(playlistTracks[0], playlistTracks)}
+                      className="px-4 py-2 rounded-full bg-white text-[#090b10] text-xs font-semibold flex items-center gap-1.5"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Play</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Rename playlist"
+                    onClick={beginRename}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/65 hover:bg-white/10 hover:text-white"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Delete playlist"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-white/65 hover:bg-rose-500/15 hover:text-rose-200"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
-            </div>
-            {playlistTracks.length > 0 && (
-              <button
-                type="button"
-                onClick={() => onPlayTrack(playlistTracks[0], playlistTracks)}
-                className="px-4 py-2 rounded-full bg-white text-[#090b10] text-xs font-semibold flex items-center gap-1.5 shrink-0"
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Play</span>
-              </button>
+            )}
+
+            {confirmingDelete && !renamingPlaylist && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-50">
+                <span>
+                  Delete “{activePlaylist.name}”? Songs stay in your library.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/80 hover:bg-white/10"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeletePlaylist(activePlaylist.id);
+                      setConfirmingDelete(false);
+                    }}
+                    className="rounded-full bg-rose-200 px-3 py-1 text-[11px] font-semibold text-rose-950 hover:bg-rose-100"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -648,13 +695,13 @@ export function SecondaryViews({
           onPlayTrack={(track) => onPlayTrack(track, playlistTracks)}
           onToggleLike={onToggleLike}
           onAddToQueue={onAddToQueue}
-          onAddToPlaylist={(playlistId, trackId) => {
-            if (playlistId === activePlaylist?.id) {
-              onRemoveFromPlaylist(playlistId, trackId);
-            } else {
-              onAddToPlaylist(playlistId, trackId);
-            }
-          }}
+          onAddToPlaylist={onAddToPlaylist}
+          onRemoveTrack={
+            activePlaylist
+              ? (trackId) => onRemoveFromPlaylist(activePlaylist.id, trackId)
+              : undefined
+          }
+          onMoveTrack={activePlaylist ? moveTrack : undefined}
           emptyMessage={
             activePlaylist
               ? 'This playlist is empty. Use the ··· menu on any track to add songs.'

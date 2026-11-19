@@ -31,6 +31,16 @@
   --wails-draggable: no-drag;
 }
 
+/* Native file-drop affordance. The Wails runtime adds .file-drop-target-active
+   to the element carrying data-file-drop-target while files hover the window. */
+.waven-drop-overlay {
+  display: none;
+}
+
+.file-drop-target-active .waven-drop-overlay {
+  display: flex;
+}
+
 .waven-app {
   background-color: rgba(7, 8, 12, 0.62);
   background-image:

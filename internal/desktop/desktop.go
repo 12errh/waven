@@ -41,6 +41,7 @@ type Desktop struct {
 	maximized     atomic.Bool
 
 	settings    *SettingsService
+	library     *LibraryService
 	startHidden bool
 
 	boundsLock   sync.Mutex
@@ -51,8 +52,8 @@ type Desktop struct {
 // New wires the desktop shell to the persisted settings. startHidden is true
 // when the process was launched with --hidden; the saved app.startHidden
 // preference is applied inside Start.
-func New(app *application.App, settings *SettingsService, startHidden bool) *Desktop {
-	return &Desktop{app: app, settings: settings, startHidden: startHidden}
+func New(app *application.App, settings *SettingsService, library *LibraryService, startHidden bool) *Desktop {
+	return &Desktop{app: app, settings: settings, library: library, startHidden: startHidden}
 }
 
 func (d *Desktop) Start() {
@@ -163,6 +164,7 @@ func (d *Desktop) createWindow() {
 		MinHeight:        minimumWindowHeight,
 		Frameless:        true,
 		Hidden:           d.startHidden,
+		EnableFileDrop:   true,
 		BackgroundType:   backgroundType,
 		BackgroundColour: backgroundColour,
 		InitialPosition:  application.WindowCentered,
@@ -209,7 +211,49 @@ func (d *Desktop) createWindow() {
 
 	d.registerWindowStateHooks(window)
 	d.registerDiagnosticHooks(window)
+
+	// A drop is handled in Go so a scan starts even if the frontend is busy or
+	// reloading. The frontend listens for "library:drop" to refresh its folder
+	// list and surface the outcome.
+	window.OnWindowEvent(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
+		d.handleFileDrop(event.Context().DroppedFiles())
+	})
+
 	d.window = window
+}
+
+// DropOutcome reports the result of a native file drop that has already been
+// registered with the library. The frontend uses it for a toast and refresh.
+type DropOutcome struct {
+	Result      FolderImportResult `json:"result"`
+	Error       string             `json:"error,omitempty"`
+	ScanStarted bool               `json:"scanStarted"`
+}
+
+func (d *Desktop) handleFileDrop(paths []string) {
+	if d.library == nil || len(paths) == 0 {
+		return
+	}
+	go func() {
+		result, err := d.library.ImportDroppedPaths(paths)
+		outcome := DropOutcome{Result: result}
+		if err != nil {
+			outcome.Error = err.Error()
+		}
+		if len(result.Added) > 0 {
+			if scanErr := d.library.Rescan(0); scanErr != nil {
+				// A scan already in flight is not a failed drop; tell the user
+				// the folders were added and the current scan will include them
+				// on its next pass.
+				outcome.Result.Warnings = append(outcome.Result.Warnings, scanErr.Error())
+			} else {
+				outcome.ScanStarted = true
+			}
+		}
+		if d.app != nil {
+			d.app.Event.Emit("library:drop", outcome)
+		}
+	}()
 }
 
 // registerWindowStateHooks records the normal window placement after a move or

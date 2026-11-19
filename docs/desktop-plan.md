@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phases 0–3 complete; Phase 4 next
+**Status:** Phases 0–4 complete; Phase 5 next
 **Date:** 2026-11-19
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -759,21 +759,30 @@ hidden, tray restore, Settings with three toggles and three appearance cards, us
 maximise persistence, and the autostart entry updating to `Exec="…/waven" --hidden`. A second
 launch focuses the first instance, and relaunching restores `window.bounds` and `window.mode`.
 
-Mini-player actions (`ShowMini`, `SetAlwaysOnTop`) remain part of Phase 4 rather than the
-Phase 3 `Window` surface.
+Mini-player actions (`ShowMini`, `SetAlwaysOnTop`) move to Phase 5 with the rest of the mini
+player rather than the Phase 3 `Window` surface.
 
-### Phase 4 — Library UX (1–2 days)
+### Phase 4 — Library UX (1–2 days) ✅
 
-- [ ] Local search with grouped results and keyboard navigation.
-- [ ] Likes persisted in SQLite.
-- [ ] Playlist create/rename/delete/add/remove/reorder.
-- [ ] Drag-and-drop files/folders.
-- [ ] In-library mixes.
-- [ ] Library stats screen and cache size.
-- [ ] Toast/error polish.
+- [x] Local search with grouped results and keyboard navigation.
+- [x] Likes persisted in SQLite.
+- [x] Playlist create/rename/delete/add/remove/reorder.
+- [x] Drag-and-drop files/folders.
+- [x] In-library mixes.
+- [x] Library stats screen and cache size.
+- [x] Toast/error polish.
 
 **Done when:** all screens use real data, playlists and likes survive restart, and dropping
 a folder starts a scan.
+
+Verified by `internal/store/playlists_test.go` (lifecycle, ordering, stale reorder rejection,
+one-time legacy import) and `internal/desktop/library_test.go` (playlist bindings, dropped
+path normalization, nested-root collapsing, existing-root and parent-of-existing warnings).
+The Go shell handles `WindowFilesDropped`, imports the folders, starts one scan, and emits
+`library:drop` for the frontend toast. The browser preview run confirmed grouped search with
+a single ↑/↓/Enter/Esc cursor, playlist create/rename/delete, add/remove/reorder, toast
+feedback, and the drop overlay; `go test ./...`, `npm test`, `npm run build`, and
+`wails3 task build` all pass.
 
 ### Phase 5 — Mini player and polish (1–2 days)
 

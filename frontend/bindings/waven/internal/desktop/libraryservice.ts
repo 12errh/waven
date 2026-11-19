@@ -29,6 +29,13 @@ export function AddFolder(path: string): $CancellablePromise<store$0.Folder> {
 }
 
 /**
+ * AddTrackToPlaylist appends a track if it is not already in the playlist.
+ */
+export function AddTrackToPlaylist(id: number, trackID: number): $CancellablePromise<void> {
+    return $Call.ByID(977638834, id, trackID);
+}
+
+/**
  * CancelScan stops the running scan.
  */
 export function CancelScan(): $CancellablePromise<void> {
@@ -36,11 +43,27 @@ export function CancelScan(): $CancellablePromise<void> {
 }
 
 /**
+ * CreatePlaylist creates a playlist and optionally seeds it with tracks.
+ */
+export function CreatePlaylist(name: string, trackIDs: number[]): $CancellablePromise<$models.Playlist> {
+    return $Call.ByID(2885426973, name, trackIDs).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * DeletePlaylist removes a playlist. Tracks and files are untouched.
+ */
+export function DeletePlaylist(id: number): $CancellablePromise<void> {
+    return $Call.ByID(3371505782, id);
+}
+
+/**
  * GetAlbums returns grouped albums.
  */
 export function GetAlbums(limit: number, offset: number): $CancellablePromise<$models.AlbumPage> {
     return $Call.ByID(299163501, limit, offset).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -49,7 +72,7 @@ export function GetAlbums(limit: number, offset: number): $CancellablePromise<$m
  */
 export function GetArtists(limit: number, offset: number): $CancellablePromise<$models.ArtistPage> {
     return $Call.ByID(1236084599, limit, offset).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -58,7 +81,7 @@ export function GetArtists(limit: number, offset: number): $CancellablePromise<$
  */
 export function GetFolders(): $CancellablePromise<store$0.Folder[]> {
     return $Call.ByID(1506263562).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -67,7 +90,7 @@ export function GetFolders(): $CancellablePromise<store$0.Folder[]> {
  */
 export function GetGenres(): $CancellablePromise<$models.Genre[]> {
     return $Call.ByID(456570985).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -76,7 +99,7 @@ export function GetGenres(): $CancellablePromise<$models.Genre[]> {
  */
 export function GetLikedIDs(): $CancellablePromise<number[]> {
     return $Call.ByID(516155880).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -86,7 +109,16 @@ export function GetLikedIDs(): $CancellablePromise<number[]> {
  */
 export function GetMix(kind: string, limit: number): $CancellablePromise<$models.Track[]> {
     return $Call.ByID(1340074113, kind, limit).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
+    });
+}
+
+/**
+ * GetPlaylists returns every playlist with its ordered track IDs.
+ */
+export function GetPlaylists(): $CancellablePromise<$models.Playlist[]> {
+    return $Call.ByID(2343468008).then(($result: any) => {
+        return $$createType10($result);
     });
 }
 
@@ -95,7 +127,7 @@ export function GetMix(kind: string, limit: number): $CancellablePromise<$models
  */
 export function GetStats(): $CancellablePromise<$models.LibraryStats> {
     return $Call.ByID(333328140).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType11($result);
     });
 }
 
@@ -104,7 +136,7 @@ export function GetStats(): $CancellablePromise<$models.LibraryStats> {
  */
 export function GetTrack(id: number): $CancellablePromise<$models.Track> {
     return $Call.ByID(619347548, id).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -113,8 +145,27 @@ export function GetTrack(id: number): $CancellablePromise<$models.Track> {
  */
 export function GetTracks(query: $models.TrackQuery): $CancellablePromise<$models.TrackPage> {
     return $Call.ByID(1277469693, query).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType12($result);
     });
+}
+
+/**
+ * ImportDroppedPaths registers the folders behind a native file drop. Dropped
+ * files contribute their parent directory because the library is folder based.
+ * The frontend starts the scan after this returns so one drop means one scan.
+ */
+export function ImportDroppedPaths(paths: string[]): $CancellablePromise<$models.FolderImportResult> {
+    return $Call.ByID(3645913496, paths).then(($result: any) => {
+        return $$createType13($result);
+    });
+}
+
+/**
+ * ImportPlaylists performs the one-time import of the old localStorage
+ * playlists. The store keeps a marker so relaunching cannot duplicate them.
+ */
+export function ImportPlaylists(imports: $models.PlaylistImport[]): $CancellablePromise<number> {
+    return $Call.ByID(1190415669, imports);
 }
 
 /**
@@ -133,6 +184,28 @@ export function RemoveFolder(id: number): $CancellablePromise<void> {
 }
 
 /**
+ * RemoveFromPlaylist removes a track from a playlist.
+ */
+export function RemoveFromPlaylist(id: number, trackID: number): $CancellablePromise<void> {
+    return $Call.ByID(3398555309, id, trackID);
+}
+
+/**
+ * RenamePlaylist updates a playlist name.
+ */
+export function RenamePlaylist(id: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(3557027231, id, name);
+}
+
+/**
+ * ReorderPlaylist rewrites the track order. The frontend sends the complete
+ * list so stored positions always match what the user sees.
+ */
+export function ReorderPlaylist(id: number, trackIDs: number[]): $CancellablePromise<void> {
+    return $Call.ByID(329992420, id, trackIDs);
+}
+
+/**
  * Rescan starts a scan in the background. folderID 0 scans every root.
  */
 export function Rescan(folderID: number): $CancellablePromise<void> {
@@ -144,7 +217,7 @@ export function Rescan(folderID: number): $CancellablePromise<void> {
  */
 export function ScanStatus(): $CancellablePromise<$models.ScanStatus> {
     return $Call.ByID(3789815332).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType14($result);
     });
 }
 
@@ -153,7 +226,7 @@ export function ScanStatus(): $CancellablePromise<$models.ScanStatus> {
  */
 export function Search(query: string, limit: number): $CancellablePromise<$models.SearchResults> {
     return $Call.ByID(3692877971, query, limit).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType15($result);
     });
 }
 
@@ -173,15 +246,18 @@ export function SetLiked(id: number, liked: boolean): $CancellablePromise<void> 
 
 // Private type creation functions
 const $$createType0 = store$0.Folder.createFrom;
-const $$createType1 = $models.AlbumPage.createFrom;
-const $$createType2 = $models.ArtistPage.createFrom;
-const $$createType3 = $Create.Array($$createType0);
-const $$createType4 = $models.Genre.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = $models.Track.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $models.LibraryStats.createFrom;
-const $$createType10 = $models.TrackPage.createFrom;
-const $$createType11 = $models.ScanStatus.createFrom;
-const $$createType12 = $models.SearchResults.createFrom;
+const $$createType1 = $models.Playlist.createFrom;
+const $$createType2 = $models.AlbumPage.createFrom;
+const $$createType3 = $models.ArtistPage.createFrom;
+const $$createType4 = $Create.Array($$createType0);
+const $$createType5 = $models.Genre.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = $models.Track.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = $Create.Array($$createType1);
+const $$createType11 = $models.LibraryStats.createFrom;
+const $$createType12 = $models.TrackPage.createFrom;
+const $$createType13 = $models.FolderImportResult.createFrom;
+const $$createType14 = $models.ScanStatus.createFrom;
+const $$createType15 = $models.SearchResults.createFrom;

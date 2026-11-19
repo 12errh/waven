@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrackToPlaylist,
   buildShuffleOrder,
   clampResumeSeconds,
   computeSeekTime,
@@ -17,9 +16,8 @@ import {
   groupTracksByArtist,
   normalizePlayerSession,
   playRecordThresholdSeconds,
-  removeTrackFromPlaylist,
 } from './player-logic.ts';
-import type { Playlist, Track } from './types.ts';
+import type { Track } from './types.ts';
 
 function track(id: number, title: string, artist: string, album: string, genre: string): Track {
   return {
@@ -273,19 +271,6 @@ test('search and genre filters match accurately', () => {
 test('grouping helpers aggregate artists and albums', () => {
   assert.equal(groupTracksByArtist(sampleTracks).length, 3);
   assert.equal(groupTracksByAlbum(sampleTracks).length, 3);
-});
-
-test('playlist add and remove avoid duplicates and preserve immutability', () => {
-  const initial: Playlist[] = [
-    { id: 'p1', name: 'Late Night', description: '', trackIds: [1], coverSrc: '/a.jpg', createdAt: 1 },
-  ];
-  const added = addTrackToPlaylist(initial, 'p1', 2);
-  assert.deepEqual(added[0].trackIds, [1, 2]);
-  const deduped = addTrackToPlaylist(added, 'p1', 2);
-  assert.deepEqual(deduped[0].trackIds, [1, 2]);
-  const removed = removeTrackFromPlaylist(deduped, 'p1', 1);
-  assert.deepEqual(removed[0].trackIds, [2]);
-  assert.deepEqual(initial[0].trackIds, [1]);
 });
 
 test('computeSeekTime clamps ratios between 0 and 1', () => {

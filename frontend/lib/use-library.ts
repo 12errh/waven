@@ -7,8 +7,11 @@ import type {
   ArtistPage,
   Folder,
   Genre,
+  LibraryDrop,
   LibraryStats,
   MixKind,
+  Playlist,
+  PlaylistImport,
   ScanProgress,
   ScanSummary,
   SearchResults,
@@ -56,6 +59,10 @@ export interface LibraryController {
   recent: Track[];
   recentTotal: number;
   likes: Set<number>;
+  playlists: Playlist[];
+  /** Most recent native file drop, for the toast layer. */
+  drop: LibraryDrop | null;
+  clearDrop: () => void;
   scan: ScanState;
   /** Bumped after scans and folder changes so tab data reloads. */
   revision: number;
@@ -75,6 +82,14 @@ export interface LibraryController {
   cancelScan: () => Promise<void>;
   toggleLike: (id: number) => Promise<void>;
   reportDuration: (id: number, seconds: number) => Promise<void>;
+  createPlaylist: (name: string, trackIds?: number[]) => Promise<Playlist | null>;
+  renamePlaylist: (id: number, name: string) => Promise<boolean>;
+  deletePlaylist: (id: number) => Promise<boolean>;
+  addTrackToPlaylist: (id: number, trackId: number) => Promise<boolean>;
+  removeFromPlaylist: (id: number, trackId: number) => Promise<boolean>;
+  reorderPlaylist: (id: number, trackIds: number[]) => Promise<boolean>;
+  importLegacyPlaylists: (imports: PlaylistImport[]) => Promise<number>;
+  importDroppedPaths: (paths: string[]) => Promise<void>;
 }
 
 const RECENT_LIMIT = 60;
@@ -113,6 +128,8 @@ export function useLibrary(): LibraryController {
   const [recent, setRecent] = useState<Track[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
   const [likes, setLikes] = useState<Set<number>>(new Set());
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [drop, setDrop] = useState<LibraryDrop | null>(null);
   const [scan, setScan] = useState<ScanState>({
     running: false,
     progress: IDLE_PROGRESS,
@@ -149,12 +166,14 @@ export function useLibrary(): LibraryController {
 
   const refreshCollections = useCallback(
     async (client: LibraryApi) => {
-      const [folderResult, statsResult, likedResult, recentResult] = await Promise.allSettled([
-        client.getFolders(),
-        client.getStats(),
-        client.getLikedIds(),
-        client.getTracks(recentQuery()),
-      ]);
+      const [folderResult, statsResult, likedResult, recentResult, playlistResult] =
+        await Promise.allSettled([
+          client.getFolders(),
+          client.getStats(),
+          client.getLikedIds(),
+          client.getTracks(recentQuery()),
+          client.getPlaylists(),
+        ]);
       if (folderResult.status === 'fulfilled') setFolders(folderResult.value);
       if (statsResult.status === 'fulfilled') setStats(statsResult.value);
       if (likedResult.status === 'fulfilled') setLikes(new Set(likedResult.value));
@@ -163,8 +182,9 @@ export function useLibrary(): LibraryController {
         setRecentTotal(recentResult.value.total);
         upsertTracks(recentResult.value.tracks);
       }
+      if (playlistResult.status === 'fulfilled') setPlaylists(playlistResult.value);
       setRevision((value) => value + 1);
-      const failure = [folderResult, statsResult, likedResult, recentResult].find(
+      const failure = [folderResult, statsResult, likedResult, recentResult, playlistResult].find(
         (result) => result.status === 'rejected'
       );
       if (failure && failure.status === 'rejected') {
@@ -178,6 +198,7 @@ export function useLibrary(): LibraryController {
     let closed = false;
     let offProgress: (() => void) | undefined;
     let offDone: (() => void) | undefined;
+    let offDrop: (() => void) | undefined;
 
     void (async () => {
       try {
@@ -185,13 +206,14 @@ export function useLibrary(): LibraryController {
         if (closed) return;
         setApi(client);
 
-        const [folderResult, statsResult, likedResult, statusResult, recentResult] =
+        const [folderResult, statsResult, likedResult, statusResult, recentResult, playlistResult] =
           await Promise.allSettled([
             client.getFolders(),
             client.getStats(),
             client.getLikedIds(),
             client.scanStatus(),
             client.getTracks(recentQuery()),
+            client.getPlaylists(),
           ]);
         if (closed) return;
 
@@ -211,9 +233,15 @@ export function useLibrary(): LibraryController {
           setRecentTotal(recentResult.value.total);
           upsertTracks(recentResult.value.tracks);
         }
-        const failure = [folderResult, statsResult, likedResult, statusResult, recentResult].find(
-          (result) => result.status === 'rejected'
-        );
+        if (playlistResult.status === 'fulfilled') setPlaylists(playlistResult.value);
+        const failure = [
+          folderResult,
+          statsResult,
+          likedResult,
+          statusResult,
+          recentResult,
+          playlistResult,
+        ].find((result) => result.status === 'rejected');
         if (failure && failure.status === 'rejected') {
           setError(errorMessage(failure.reason));
         }
@@ -229,6 +257,16 @@ export function useLibrary(): LibraryController {
           setScan({ running: false, progress: IDLE_PROGRESS, last: summary });
           void refreshCollections(client);
         });
+        offDrop = client.onLibraryDrop((outcome) => {
+          setDrop(outcome);
+          if (outcome.result?.folders?.length) {
+            setFolders((current) => {
+              const seen = new Set(current.map((folder) => folder.id));
+              return [...current, ...outcome.result.folders.filter((folder) => !seen.has(folder.id))];
+            });
+          }
+          void refreshCollections(client);
+        });
 
         setReady(true);
       } catch (loadError) {
@@ -242,6 +280,7 @@ export function useLibrary(): LibraryController {
       closed = true;
       offProgress?.();
       offDone?.();
+      offDrop?.();
     };
   }, [refreshCollections, upsertTracks]);
 
@@ -468,6 +507,194 @@ export function useLibrary(): LibraryController {
 
   const clearError = useCallback(() => setError(null), []);
 
+  const reloadPlaylists = useCallback(
+    async (client?: LibraryApi) => {
+      const target = client ?? api;
+      if (!target) return;
+      try {
+        setPlaylists(await target.getPlaylists());
+      } catch (playlistError) {
+        setError(errorMessage(playlistError));
+      }
+    },
+    [api]
+  );
+
+  const createPlaylist = useCallback(
+    async (name: string, trackIds: number[] = []): Promise<Playlist | null> => {
+      if (!api) return null;
+      try {
+        const playlist = await api.createPlaylist(name, trackIds);
+        setPlaylists((current) => [
+          playlist,
+          ...current.filter((entry) => entry.id !== playlist.id),
+        ]);
+        return playlist;
+      } catch (createError) {
+        setError(errorMessage(createError));
+        return null;
+      }
+    },
+    [api]
+  );
+
+  const renamePlaylist = useCallback(
+    async (id: number, name: string): Promise<boolean> => {
+      if (!api) return false;
+      const clean = name.trim();
+      if (!clean) {
+        setError('Playlist name cannot be empty.');
+        return false;
+      }
+      try {
+        await api.renamePlaylist(id, clean);
+        setPlaylists((current) =>
+          current.map((playlist) =>
+            playlist.id === id
+              ? { ...playlist, name: clean, updatedAt: Date.now() }
+              : playlist
+          )
+        );
+        return true;
+      } catch (renameError) {
+        setError(errorMessage(renameError));
+        return false;
+      }
+    },
+    [api]
+  );
+
+  const deletePlaylist = useCallback(
+    async (id: number): Promise<boolean> => {
+      if (!api) return false;
+      try {
+        await api.deletePlaylist(id);
+        setPlaylists((current) => current.filter((playlist) => playlist.id !== id));
+        return true;
+      } catch (deleteError) {
+        setError(errorMessage(deleteError));
+        return false;
+      }
+    },
+    [api]
+  );
+
+  const addTrackToPlaylist = useCallback(
+    async (id: number, trackId: number): Promise<boolean> => {
+      if (!api) return false;
+      const cached = indexRef.current.get(trackId);
+      setPlaylists((current) =>
+        current.map((playlist) =>
+          playlist.id === id && !playlist.trackIds.includes(trackId)
+            ? {
+                ...playlist,
+                trackIds: [...playlist.trackIds, trackId],
+                coverSrc: playlist.coverSrc || cached?.coverSrc || '',
+                updatedAt: Date.now(),
+              }
+            : playlist
+        )
+      );
+      try {
+        await api.addTrackToPlaylist(id, trackId);
+        return true;
+      } catch (addError) {
+        setError(errorMessage(addError));
+        await reloadPlaylists(api);
+        return false;
+      }
+    },
+    [api, reloadPlaylists]
+  );
+
+  const removeFromPlaylist = useCallback(
+    async (id: number, trackId: number): Promise<boolean> => {
+      if (!api) return false;
+      setPlaylists((current) =>
+        current.map((playlist) => {
+          if (playlist.id !== id) return playlist;
+          const trackIds = playlist.trackIds.filter((entry) => entry !== trackId);
+          return {
+            ...playlist,
+            trackIds,
+            coverSrc: indexRef.current.get(trackIds[0] ?? -1)?.coverSrc ?? playlist.coverSrc,
+            updatedAt: Date.now(),
+          };
+        })
+      );
+      try {
+        await api.removeFromPlaylist(id, trackId);
+        return true;
+      } catch (removeError) {
+        setError(errorMessage(removeError));
+        await reloadPlaylists(api);
+        return false;
+      }
+    },
+    [api, reloadPlaylists]
+  );
+
+  const reorderPlaylist = useCallback(
+    async (id: number, trackIds: number[]): Promise<boolean> => {
+      if (!api) return false;
+      setPlaylists((current) =>
+        current.map((playlist) =>
+          playlist.id === id
+            ? { ...playlist, trackIds: [...trackIds], updatedAt: Date.now() }
+            : playlist
+        )
+      );
+      try {
+        await api.reorderPlaylist(id, trackIds);
+        return true;
+      } catch (reorderError) {
+        setError(errorMessage(reorderError));
+        await reloadPlaylists(api);
+        return false;
+      }
+    },
+    [api, reloadPlaylists]
+  );
+
+  const importLegacyPlaylists = useCallback(
+    async (imports: PlaylistImport[]): Promise<number> => {
+      if (!api || imports.length === 0) return 0;
+      try {
+        const count = await api.importPlaylists(imports);
+        if (count > 0) await reloadPlaylists(api);
+        return count;
+      } catch (importError) {
+        setError(errorMessage(importError));
+        return 0;
+      }
+    },
+    [api, reloadPlaylists]
+  );
+
+  const importDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      if (!api || paths.length === 0) return;
+      try {
+        const result = await api.importDroppedPaths(paths);
+        setDrop({ result, scanStarted: false });
+        await refreshCollections(api);
+        if (result.added.length > 0) {
+          await api.rescan(0);
+          setScan((current) => ({
+            ...current,
+            running: true,
+            progress: { ...IDLE_PROGRESS, phase: 'starting' },
+          }));
+        }
+      } catch (dropError) {
+        setError(errorMessage(dropError));
+      }
+    },
+    [api, refreshCollections]
+  );
+
+  const clearDrop = useCallback(() => setDrop(null), []);
+
   return useMemo(
     () => ({
       ready,
@@ -479,6 +706,9 @@ export function useLibrary(): LibraryController {
       recent,
       recentTotal,
       likes,
+      playlists,
+      drop,
+      clearDrop,
       scan,
       revision,
       loadTracks,
@@ -497,6 +727,14 @@ export function useLibrary(): LibraryController {
       cancelScan,
       toggleLike,
       reportDuration,
+      createPlaylist,
+      renamePlaylist,
+      deletePlaylist,
+      addTrackToPlaylist,
+      removeFromPlaylist,
+      reorderPlaylist,
+      importLegacyPlaylists,
+      importDroppedPaths,
     }),
     [
       ready,
@@ -508,6 +746,9 @@ export function useLibrary(): LibraryController {
       recent,
       recentTotal,
       likes,
+      playlists,
+      drop,
+      clearDrop,
       scan,
       revision,
       loadTracks,
@@ -526,6 +767,14 @@ export function useLibrary(): LibraryController {
       cancelScan,
       toggleLike,
       reportDuration,
+      createPlaylist,
+      renamePlaylist,
+      deletePlaylist,
+      addTrackToPlaylist,
+      removeFromPlaylist,
+      reorderPlaylist,
+      importLegacyPlaylists,
+      importDroppedPaths,
     ]
   );
 }
