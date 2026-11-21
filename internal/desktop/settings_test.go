@@ -48,6 +48,9 @@ func TestSettingsDefaults(t *testing.T) {
 	if !got.AlwaysOnTopMini {
 		t.Fatal("AlwaysOnTopMini should default to true")
 	}
+	if got.Layout != defaultLayoutSettings() {
+		t.Fatalf("Layout = %+v, want %+v", got.Layout, defaultLayoutSettings())
+	}
 }
 
 func TestSettingsRoundTrip(t *testing.T) {
@@ -59,6 +62,13 @@ func TestSettingsRoundTrip(t *testing.T) {
 		StartHidden:     true,
 		Autostart:       true,
 		AlwaysOnTopMini: false,
+		Layout: LayoutSettings{
+			DockPosition: "bottom",
+			DockExpanded: true,
+			NavPosition:  "bottom",
+			HeroPosition: "left",
+			Split:        44,
+		},
 	}
 	saved, err := settings.Update(next)
 	if err != nil {
@@ -190,6 +200,13 @@ func TestSettingsPersistAcrossReopen(t *testing.T) {
 		StartHidden:     true,
 		Autostart:       true,
 		AlwaysOnTopMini: false,
+		Layout: LayoutSettings{
+			DockPosition: "right",
+			DockExpanded: false,
+			NavPosition:  "hidden",
+			HeroPosition: "bottom",
+			Split:        70,
+		},
 	}
 	if _, err := service.Update(want); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -285,5 +302,51 @@ func TestWindowBoundsRejectsInvalidRows(t *testing.T) {
 
 	if err := settings.saveWindowBounds(WindowBounds{Width: 0, Height: 100}); err == nil {
 		t.Fatal("saveWindowBounds should reject a zero width")
+	}
+}
+
+func TestSettingsNormalisesLayout(t *testing.T) {
+	settings, st := newSettingsTestService(t)
+
+	if err := st.SetSetting(settingUILayout, `{"dockPosition":"diagonal","navPosition":"sideways","heroPosition":"top","split":99}`); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	got, err := settings.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Layout != defaultLayoutSettings() {
+		t.Fatalf("Layout = %+v, want defaults", got.Layout)
+	}
+
+	if err := st.SetSetting(settingUILayout, "not json"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	got, err = settings.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Layout != defaultLayoutSettings() {
+		t.Fatalf("Layout after bad JSON = %+v, want defaults", got.Layout)
+	}
+}
+
+func TestSettingsClampsSplitWhenWriting(t *testing.T) {
+	settings, _ := newSettingsTestService(t)
+
+	saved, err := settings.Update(AppSettings{
+		WindowMode: WindowModeGlass,
+		Layout: LayoutSettings{
+			DockPosition: "left",
+			NavPosition:  "top",
+			HeroPosition: "right",
+			Split:        10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if saved.Layout.Split != 58 {
+		t.Fatalf("Split = %d, want the default 58", saved.Layout.Split)
 	}
 }

@@ -154,6 +154,7 @@ export class AppSettings {
     "startHidden": boolean;
     "autostart": boolean;
     "alwaysOnTopMini": boolean;
+    "layout": LayoutSettings;
 
     /** Creates a new AppSettings instance. */
     constructor($$source: Partial<AppSettings> = {}) {
@@ -172,6 +173,9 @@ export class AppSettings {
         if (!("alwaysOnTopMini" in $$source)) {
             this["alwaysOnTopMini"] = false;
         }
+        if (!("layout" in $$source)) {
+            this["layout"] = (new LayoutSettings());
+        }
 
         Object.assign(this, $$source);
     }
@@ -180,7 +184,11 @@ export class AppSettings {
      * Creates a new AppSettings instance from a string or object.
      */
     static createFrom($$source: any = {}): AppSettings {
+        const $$createField5_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("layout" in $$parsedSource) {
+            $$parsedSource["layout"] = $$createField5_0($$parsedSource["layout"]);
+        }
         return new AppSettings($$parsedSource as Partial<AppSettings>);
     }
 }
@@ -252,7 +260,7 @@ export class ArtistPage {
      * Creates a new ArtistPage instance from a string or object.
      */
     static createFrom($$source: any = {}): ArtistPage {
-        const $$createField0_0 = $$createType3;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("artists" in $$parsedSource) {
             $$parsedSource["artists"] = $$createField0_0($$parsedSource["artists"]);
@@ -294,10 +302,10 @@ export class FolderImportResult {
      * Creates a new FolderImportResult instance from a string or object.
      */
     static createFrom($$source: any = {}): FolderImportResult {
-        const $$createField0_0 = $$createType5;
-        const $$createField1_0 = $$createType6;
-        const $$createField2_0 = $$createType6;
-        const $$createField3_0 = $$createType6;
+        const $$createField0_0 = $$createType6;
+        const $$createField1_0 = $$createType7;
+        const $$createField2_0 = $$createType7;
+        const $$createField3_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("folders" in $$parsedSource) {
             $$parsedSource["folders"] = $$createField0_0($$parsedSource["folders"]);
@@ -340,6 +348,47 @@ export class Genre {
     static createFrom($$source: any = {}): Genre {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new Genre($$parsedSource as Partial<Genre>);
+    }
+}
+
+/**
+ * LayoutSettings stores the user's shell arrangement. Positions are validated
+ * on read and write so a hand-edited database row can never break the shell.
+ */
+export class LayoutSettings {
+    "dockPosition": string;
+    "dockExpanded": boolean;
+    "navPosition": string;
+    "heroPosition": string;
+    "split": number;
+
+    /** Creates a new LayoutSettings instance. */
+    constructor($$source: Partial<LayoutSettings> = {}) {
+        if (!("dockPosition" in $$source)) {
+            this["dockPosition"] = "";
+        }
+        if (!("dockExpanded" in $$source)) {
+            this["dockExpanded"] = false;
+        }
+        if (!("navPosition" in $$source)) {
+            this["navPosition"] = "";
+        }
+        if (!("heroPosition" in $$source)) {
+            this["heroPosition"] = "";
+        }
+        if (!("split" in $$source)) {
+            this["split"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LayoutSettings instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LayoutSettings {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LayoutSettings($$parsedSource as Partial<LayoutSettings>);
     }
 }
 
@@ -459,8 +508,8 @@ export class PlayerSession {
      * Creates a new PlayerSession instance from a string or object.
      */
     static createFrom($$source: any = {}): PlayerSession {
-        const $$createField2_0 = $$createType7;
-        const $$createField5_0 = $$createType7;
+        const $$createField2_0 = $$createType8;
+        const $$createField5_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("queueIds" in $$parsedSource) {
             $$parsedSource["queueIds"] = $$createField2_0($$parsedSource["queueIds"]);
@@ -556,7 +605,7 @@ export class Playlist {
      * Creates a new Playlist instance from a string or object.
      */
     static createFrom($$source: any = {}): Playlist {
-        const $$createField2_0 = $$createType7;
+        const $$createField2_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("trackIds" in $$parsedSource) {
             $$parsedSource["trackIds"] = $$createField2_0($$parsedSource["trackIds"]);
@@ -592,7 +641,7 @@ export class PlaylistImport {
      * Creates a new PlaylistImport instance from a string or object.
      */
     static createFrom($$source: any = {}): PlaylistImport {
-        const $$createField1_0 = $$createType7;
+        const $$createField1_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("trackIds" in $$parsedSource) {
             $$parsedSource["trackIds"] = $$createField1_0($$parsedSource["trackIds"]);
@@ -625,8 +674,8 @@ export class ScanStatus {
      * Creates a new ScanStatus instance from a string or object.
      */
     static createFrom($$source: any = {}): ScanStatus {
-        const $$createField1_0 = $$createType8;
-        const $$createField2_0 = $$createType10;
+        const $$createField1_0 = $$createType9;
+        const $$createField2_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("progress" in $$parsedSource) {
             $$parsedSource["progress"] = $$createField1_0($$parsedSource["progress"]);
@@ -665,9 +714,9 @@ export class SearchResults {
      * Creates a new SearchResults instance from a string or object.
      */
     static createFrom($$source: any = {}): SearchResults {
-        const $$createField0_0 = $$createType12;
+        const $$createField0_0 = $$createType13;
         const $$createField1_0 = $$createType1;
-        const $$createField2_0 = $$createType3;
+        const $$createField2_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tracks" in $$parsedSource) {
             $$parsedSource["tracks"] = $$createField0_0($$parsedSource["tracks"]);
@@ -818,7 +867,7 @@ export class TrackPage {
      * Creates a new TrackPage instance from a string or object.
      */
     static createFrom($$source: any = {}): TrackPage {
-        const $$createField0_0 = $$createType12;
+        const $$createField0_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tracks" in $$parsedSource) {
             $$parsedSource["tracks"] = $$createField0_0($$parsedSource["tracks"]);
@@ -886,14 +935,15 @@ export class TrackQuery {
 // Private type creation functions
 const $$createType0 = Album.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = Artist.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = store$0.Folder.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
+const $$createType2 = LayoutSettings.createFrom;
+const $$createType3 = Artist.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = store$0.Folder.createFrom;
+const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = $Create.Array($Create.Any);
-const $$createType8 = library$0.Progress.createFrom;
-const $$createType9 = library$0.ScanSummary.createFrom;
-const $$createType10 = $Create.Nullable($$createType9);
-const $$createType11 = Track.createFrom;
-const $$createType12 = $Create.Array($$createType11);
+const $$createType8 = $Create.Array($Create.Any);
+const $$createType9 = library$0.Progress.createFrom;
+const $$createType10 = library$0.ScanSummary.createFrom;
+const $$createType11 = $Create.Nullable($$createType10);
+const $$createType12 = Track.createFrom;
+const $$createType13 = $Create.Array($$createType12);

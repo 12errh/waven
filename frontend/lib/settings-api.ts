@@ -7,6 +7,12 @@ import {
   isWindowMode,
   type WindowMode,
 } from './window-mode';
+import {
+  DEFAULT_LAYOUT,
+  normalizeLayout,
+  type LayoutSettings,
+  type RawLayoutSettings,
+} from './layout';
 
 /**
  * The settings surface shared by the Wails bindings and the browser preview.
@@ -19,6 +25,7 @@ export interface AppSettings {
   startHidden: boolean;
   autostart: boolean;
   alwaysOnTopMini: boolean;
+  layout: LayoutSettings;
 }
 
 /** Read-only shell information for the About section. */
@@ -46,6 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   startHidden: false,
   autostart: false,
   alwaysOnTopMini: true,
+  layout: DEFAULT_LAYOUT,
 };
 
 const PREVIEW_INFO: AppInfo = {
@@ -57,7 +65,10 @@ const PREVIEW_INFO: AppInfo = {
   autostartSupported: false,
 };
 
-type RawSettings = Partial<Omit<AppSettings, 'windowMode'>> & { windowMode?: string };
+type RawSettings = Partial<Omit<AppSettings, 'windowMode' | 'layout'>> & {
+  windowMode?: string;
+  layout?: RawLayoutSettings;
+};
 
 function normalizeSettings(raw: RawSettings | null | undefined): AppSettings {
   const mode = typeof raw?.windowMode === 'string' && isWindowMode(raw.windowMode)
@@ -69,6 +80,7 @@ function normalizeSettings(raw: RawSettings | null | undefined): AppSettings {
     startHidden: raw?.startHidden ?? DEFAULT_SETTINGS.startHidden,
     autostart: raw?.autostart ?? DEFAULT_SETTINGS.autostart,
     alwaysOnTopMini: raw?.alwaysOnTopMini ?? DEFAULT_SETTINGS.alwaysOnTopMini,
+    layout: normalizeLayout(raw?.layout),
   };
 }
 
@@ -83,14 +95,34 @@ function createDesktopApi(): SettingsApi {
   };
 }
 
+const PREVIEW_SETTINGS_KEY = 'waven_preview_settings_v1';
+
+function readPreviewSettings(): AppSettings {
+  if (typeof window === 'undefined') return { ...DEFAULT_SETTINGS };
+  try {
+    const raw = window.localStorage.getItem(PREVIEW_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    return normalizeSettings(JSON.parse(raw) as RawSettings);
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
 function createPreviewApi(): SettingsApi {
-  let stored: AppSettings = { ...DEFAULT_SETTINGS };
+  let stored = readPreviewSettings();
   return {
     preview: true,
-    get: async () => ({ ...stored }),
+    get: async () => ({ ...stored, layout: { ...stored.layout } }),
     update: async (next) => {
       stored = normalizeSettings(next);
-      return { ...stored };
+      // Persist preview preferences (including the customised layout) so a
+      // browser refresh behaves like a desktop restart.
+      try {
+        window.localStorage.setItem(PREVIEW_SETTINGS_KEY, JSON.stringify(stored));
+      } catch {
+        // Private browsing can reject writes; the in-memory copy still works.
+      }
+      return { ...stored, layout: { ...stored.layout } };
     },
     info: async () => ({ ...PREVIEW_INFO }),
     quit: async () => {},

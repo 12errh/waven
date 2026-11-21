@@ -24,16 +24,31 @@ const (
 	settingStartHidden     = "app.startHidden"
 	settingAutostart       = "app.autostart"
 	settingAlwaysOnTopMini = "app.alwaysOnTopMini"
+	settingUILayout        = "ui.layout"
+
+	layoutSplitMin = 35
+	layoutSplitMax = 75
 )
+
+// LayoutSettings stores the user's shell arrangement. Positions are validated
+// on read and write so a hand-edited database row can never break the shell.
+type LayoutSettings struct {
+	DockPosition string `json:"dockPosition"`
+	DockExpanded bool   `json:"dockExpanded"`
+	NavPosition  string `json:"navPosition"`
+	HeroPosition string `json:"heroPosition"`
+	Split        int    `json:"split"`
+}
 
 // AppSettings is the user-editable desktop configuration. Window bounds are
 // stored separately because the shell writes them automatically.
 type AppSettings struct {
-	WindowMode      string `json:"windowMode"`
-	CloseToTray     bool   `json:"closeToTray"`
-	StartHidden     bool   `json:"startHidden"`
-	Autostart       bool   `json:"autostart"`
-	AlwaysOnTopMini bool   `json:"alwaysOnTopMini"`
+	WindowMode      string         `json:"windowMode"`
+	CloseToTray     bool           `json:"closeToTray"`
+	StartHidden     bool           `json:"startHidden"`
+	Autostart       bool           `json:"autostart"`
+	AlwaysOnTopMini bool           `json:"alwaysOnTopMini"`
+	Layout          LayoutSettings `json:"layout"`
 }
 
 // AppInfo is read-only information for the About section.
@@ -101,6 +116,7 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 	}
 
 	next.WindowMode = normalizeWindowMode(next.WindowMode)
+	next.Layout = normalizeLayoutSettings(next.Layout)
 	if err := s.writeLocked(next); err != nil {
 		return AppSettings{}, err
 	}
@@ -144,7 +160,22 @@ func (s *SettingsService) readLocked() (AppSettings, error) {
 	if err != nil {
 		return settings, err
 	}
+	settings.Layout = s.readLayoutLocked()
 	return settings, nil
+}
+
+// readLayoutLocked decodes the layout JSON. Missing fields keep the defaults,
+// and unknown positions fall back to the default arrangement.
+func (s *SettingsService) readLayoutLocked() LayoutSettings {
+	layout := defaultLayoutSettings()
+	raw, ok, err := s.store.Setting(settingUILayout)
+	if err != nil || !ok {
+		return layout
+	}
+	if err := json.Unmarshal([]byte(raw), &layout); err != nil {
+		return defaultLayoutSettings()
+	}
+	return normalizeLayoutSettings(layout)
 }
 
 func (s *SettingsService) readBoolLocked(key string, fallback bool) (bool, error) {
@@ -160,12 +191,17 @@ func (s *SettingsService) readBoolLocked(key string, fallback bool) (bool, error
 }
 
 func (s *SettingsService) writeLocked(settings AppSettings) error {
+	encodedLayout, err := json.Marshal(settings.Layout)
+	if err != nil {
+		return fmt.Errorf("encode ui layout: %w", err)
+	}
 	rows := map[string]string{
 		settingWindowMode:      settings.WindowMode,
 		settingCloseToTray:     strconv.FormatBool(settings.CloseToTray),
 		settingStartHidden:     strconv.FormatBool(settings.StartHidden),
 		settingAutostart:       strconv.FormatBool(settings.Autostart),
 		settingAlwaysOnTopMini: strconv.FormatBool(settings.AlwaysOnTopMini),
+		settingUILayout:        string(encodedLayout),
 	}
 	for key, value := range rows {
 		if err := s.store.SetSetting(key, value); err != nil {
@@ -182,7 +218,41 @@ func defaultAppSettings() AppSettings {
 		StartHidden:     false,
 		Autostart:       false,
 		AlwaysOnTopMini: true,
+		Layout:          defaultLayoutSettings(),
 	}
+}
+
+func defaultLayoutSettings() LayoutSettings {
+	return LayoutSettings{
+		DockPosition: "left",
+		DockExpanded: false,
+		NavPosition:  "top",
+		HeroPosition: "right",
+		Split:        58,
+	}
+}
+
+func normalizeLayoutSettings(layout LayoutSettings) LayoutSettings {
+	defaults := defaultLayoutSettings()
+	switch layout.DockPosition {
+	case "left", "right", "bottom":
+	default:
+		layout.DockPosition = defaults.DockPosition
+	}
+	switch layout.NavPosition {
+	case "top", "bottom", "hidden":
+	default:
+		layout.NavPosition = defaults.NavPosition
+	}
+	switch layout.HeroPosition {
+	case "left", "right", "bottom", "hidden":
+	default:
+		layout.HeroPosition = defaults.HeroPosition
+	}
+	if layout.Split < layoutSplitMin || layout.Split > layoutSplitMax {
+		layout.Split = defaults.Split
+	}
+	return layout
 }
 
 // windowMode is read by the shell before creating the window.

@@ -8,9 +8,13 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { DragEvent } from 'react';
+import type {
+  CSSProperties,
+  DragEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import { motion } from 'motion/react';
-import { AlertCircle, FolderPlus, Loader2, X } from 'lucide-react';
+import { AlertCircle, FolderPlus, LayoutGrid, Loader2, X } from 'lucide-react';
 import { PlayerEngine, type PlaybackError } from '@/lib/player-engine';
 import { getPlayerApi } from '@/lib/player-api';
 import { loadDesktopRuntime } from '@/lib/desktop-runtime';
@@ -35,6 +39,16 @@ import type {
 } from '@/lib/types';
 import { useLibrary } from '@/lib/use-library';
 import { useSettings } from '@/lib/use-settings';
+import { cn } from '@/lib/utils';
+import {
+  DEFAULT_LAYOUT,
+  clampSplit,
+  type DockPosition,
+  type HeroPosition,
+  type LayoutPart,
+  type LayoutSettings,
+  type NavPosition,
+} from '@/lib/layout';
 import {
   DEFAULT_WINDOW_MODE,
   getWindowModeSnapshot,
@@ -42,7 +56,8 @@ import {
 } from '@/lib/window-mode';
 import { DesktopControls } from './DesktopControls';
 import { FeaturedCardsRow } from './FeaturedCardsRow';
-import { LeftDock } from './LeftDock';
+import { LayoutDragHandle, LayoutDropZones, LayoutToolbar } from './LayoutCustomizer';
+import { BottomDock, LeftDock, MobileDock } from './LeftDock';
 import { NowPlayingCard } from './NowPlayingCard';
 import { SecondaryViews } from './SecondaryViews';
 import { useToast } from './ToastStack';
@@ -117,6 +132,116 @@ export function WavenPlayer() {
 
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [playbackError, setPlaybackError] = useState<PlaybackError | null>(null);
+
+  const layout = settings.settings.layout;
+  const [customizing, setCustomizing] = useState(false);
+  const [dragPart, setDragPart] = useState<LayoutPart | null>(null);
+  const [hoverZone, setHoverZone] = useState<string | null>(null);
+  const [draftSplit, setDraftSplit] = useState<number | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const draftSplitRef = useRef<number | null>(null);
+  const layoutRef = useRef<LayoutSettings>(layout);
+  const updateSettings = settings.update;
+
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
+
+  const updateLayout = useCallback(
+    (patch: Partial<LayoutSettings>) => {
+      const next = { ...layoutRef.current, ...patch };
+      layoutRef.current = next;
+      void updateSettings({ layout: next });
+    },
+    [updateSettings]
+  );
+
+  const applyLayoutDrop = useCallback(
+    (part: LayoutPart, zone: string) => {
+      const [target, position] = zone.split(':');
+      if (target !== part) return;
+      if (part === 'dock') updateLayout({ dockPosition: position as DockPosition });
+      else if (part === 'nav') updateLayout({ navPosition: position as NavPosition });
+      else updateLayout({ heroPosition: position as HeroPosition });
+    },
+    [updateLayout]
+  );
+
+  const beginLayoutDrag = useCallback(
+    (part: LayoutPart) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!customizing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setHoverZone(null);
+      setDragPart(part);
+    },
+    [customizing]
+  );
+
+  useEffect(() => {
+    if (!dragPart) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDragPart(null);
+        setHoverZone(null);
+      }
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const zone = element?.closest<HTMLElement>('[data-layout-zone]')?.dataset.layoutZone;
+      if (zone) applyLayoutDrop(dragPart, zone);
+      setDragPart(null);
+      setHoverZone(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [dragPart, applyLayoutDrop]);
+
+  const setDraftSplitValue = useCallback((value: number | null) => {
+    draftSplitRef.current = value;
+    setDraftSplit(value);
+  }, []);
+
+  const commitDraftSplit = useCallback(() => {
+    const value = draftSplitRef.current;
+    if (value == null) return;
+    draftSplitRef.current = null;
+    setDraftSplit(null);
+    updateLayout({ split: value });
+  }, [updateLayout]);
+
+  const beginSplitDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const rect = bodyRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
+      event.preventDefault();
+      const heroFirst = layoutRef.current.heroPosition === 'left';
+      const onMove = (moveEvent: PointerEvent) => {
+        const boundary = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+        const content = heroFirst ? 100 - boundary : boundary;
+        setDraftSplitValue(clampSplit(content));
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        commitDraftSplit();
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [commitDraftSplit, setDraftSplitValue]
+  );
+
+  const resetLayout = useCallback(() => {
+    setDraftSplitValue(null);
+    updateLayout(DEFAULT_LAYOUT);
+  }, [setDraftSplitValue, updateLayout]);
+
+  const splitValue = draftSplit ?? layout.split;
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResponse, setSearchResponse] = useState<{
@@ -1146,6 +1271,78 @@ export function WavenPlayer() {
 
   const showDiscoverEmpty = library.ready && library.recent.length === 0;
 
+  const handleSelectSection = useCallback((section: DockSection) => {
+    setDockSection(section);
+    if (section === 'home') setTopTab('Discover');
+  }, []);
+
+  const renderPillNav = (position: 'top' | 'bottom') => (
+    <div
+      className={cn(
+        'relative flex shrink-0 justify-center max-w-full',
+        position === 'top'
+          ? 'mb-4 lg:mb-0 lg:absolute lg:-top-6 lg:left-1/2 lg:-translate-x-1/2 z-30'
+          : 'pt-3'
+      )}
+    >
+      <TopPillNav
+        activeTab={topTab}
+        onSelectTab={(tab) => {
+          setTopTab(tab);
+          setDockSection('home');
+        }}
+      />
+      {customizing && (
+        <LayoutDragHandle
+          part="nav"
+          label="Category tabs"
+          onPointerDown={beginLayoutDrag('nav')}
+          className="absolute -top-3 right-0 z-40"
+        />
+      )}
+    </div>
+  );
+
+  const renderHeroCard = (variant: 'tall' | 'bar') => (
+    <div className="relative flex min-w-0">
+      <NowPlayingCard
+        variant={variant}
+        track={currentTrack}
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        isLiked={isCurrentLiked}
+        shuffle={shuffle}
+        repeat={repeat}
+        volume={volume}
+        muted={muted}
+        playlists={playlists}
+        queueCount={queueIds.length}
+        onTogglePlay={handleTogglePlay}
+        onPrev={handlePrev}
+        onNext={() => handleNext(false)}
+        onSeek={handleSeek}
+        onToggleLike={handleToggleLike}
+        onToggleShuffle={handleToggleShuffle}
+        onCycleRepeat={handleCycleRepeat}
+        onVolumeChange={handleVolumeChange}
+        onToggleMute={handleToggleMute}
+        onAddToPlaylist={handleAddToPlaylist}
+        onOpenQueue={() => setDockSection('library')}
+        onOpenLibrary={() => setDockSection('library')}
+        readAnalyser={readAnalyser}
+      />
+      {customizing && (
+        <LayoutDragHandle
+          part="hero"
+          label="Now playing"
+          onPointerDown={beginLayoutDrag('hero')}
+          className="absolute left-3 top-3 z-40"
+        />
+      )}
+    </div>
+  );
+
   return (
     <div
       data-window-mode={windowMode}
@@ -1187,34 +1384,40 @@ export function WavenPlayer() {
         <div className="absolute inset-0 bg-gradient-to-br from-[#06070a]/85 via-[#0a0c12]/72 to-[#050609]/90" />
       </div>
 
-      {/* Centered Spatial Glassmorphic Shell + Floating Left Dock */}
-      <div className="relative z-10 w-full max-w-[1180px] min-w-0 h-full min-h-0 flex items-center gap-4 lg:gap-6">
-        <LeftDock
-          activeSection={dockSection}
-          onSelectSection={(section) => {
-            setDockSection(section);
-            if (section === 'home') setTopTab('Discover');
-          }}
-          likedCount={library.stats.liked || library.likes.size}
-        />
+      {/* Customisable shell: the dock can sit on either side or the bottom. */}
+      <div className="relative z-10 w-full max-w-[1180px] min-w-0 h-full min-h-0 flex flex-col gap-3">
+        <div className="flex flex-1 min-h-0 min-w-0 w-full items-center gap-4 lg:gap-6">
+          {layout.dockPosition === 'left' && (
+            <div className="relative flex h-full shrink-0 items-center">
+              <LeftDock
+                side="left"
+                activeSection={dockSection}
+                onSelectSection={handleSelectSection}
+                likedCount={library.stats.liked || library.likes.size}
+                expanded={layout.dockExpanded}
+                onToggleExpanded={() =>
+                  updateLayout({ dockExpanded: !layout.dockExpanded })
+                }
+              />
+              {customizing && (
+                <LayoutDragHandle
+                  part="dock"
+                  label="Navigation"
+                  onPointerDown={beginLayoutDrag('dock')}
+                  className="absolute left-1/2 top-2 -translate-x-1/2"
+                />
+              )}
+            </div>
+          )}
 
-        {/* Main Frosted Glass Window */}
-        <motion.main
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="relative flex-1 min-w-0 w-full h-full max-h-full min-h-0 flex flex-col rounded-[28px] sm:rounded-[34px] bg-white/[0.045] backdrop-blur-3xl border border-white/[0.12] shadow-[0_32px_90px_rgba(0,0,0,0.75)] p-4 sm:p-7 lg:p-8 lg:pt-9"
-        >
-          {/* Floating Centered Top Pill Navigation */}
-          <div className="flex shrink-0 justify-center mb-4 lg:mb-0 lg:absolute lg:-top-6 lg:left-1/2 lg:-translate-x-1/2 z-30 max-w-full">
-            <TopPillNav
-              activeTab={topTab}
-              onSelectTab={(tab) => {
-                setTopTab(tab);
-                setDockSection('home');
-              }}
-            />
-          </div>
+          {/* Main Frosted Glass Window */}
+          <motion.main
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="relative flex-1 min-w-0 w-full h-full max-h-full min-h-0 flex flex-col rounded-[28px] sm:rounded-[34px] bg-white/[0.045] backdrop-blur-3xl border border-white/[0.12] shadow-[0_32px_90px_rgba(0,0,0,0.75)] p-4 sm:p-7 lg:p-8 lg:pt-9"
+          >
+            {layout.navPosition === 'top' && renderPillNav('top')}
 
           {/* Top-left WAVEN Brand Wordmark + desktop window controls */}
           <header className="wails-drag -mx-1 mb-4 flex shrink-0 select-none items-center justify-between px-1 lg:mb-5">
@@ -1236,17 +1439,46 @@ export function WavenPlayer() {
                 Browser preview
               </span>
             )}
-            <DesktopControls
-              mode={windowMode}
-              onModeChange={(mode) => void settings.update({ windowMode: mode })}
-            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Customize layout"
+                aria-pressed={customizing}
+                title="Customize layout"
+                onClick={() => setCustomizing((value) => !value)}
+                className={cn(
+                  'wails-no-drag hidden h-8 w-8 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 lg:flex',
+                  customizing
+                    ? 'border-white/30 bg-white/20 text-white'
+                    : 'border-white/10 bg-white/[0.05] text-white/65 hover:bg-white/10 hover:text-white'
+                )}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <DesktopControls
+                mode={windowMode}
+                onModeChange={(mode) => void settings.update({ windowMode: mode })}
+              />
+            </div>
           </header>
 
-          {/* 2-Column Content Area — scrolls inside the fixed shell so the
-              window itself never grows past the viewport. */}
-          <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-stretch overflow-y-auto overscroll-contain waven-scroll pr-1 -mr-1">
-            {/* Left Workspace Column */}
-            <div className="lg:col-span-7 min-w-0 flex flex-col gap-5">
+          {/* Content scrolls inside the fixed shell so the window itself never
+              grows past the viewport. The player sits beside the content, or
+              stays pinned below it as a compact bar. */}
+          <div className="relative flex flex-1 min-h-0 flex-col gap-3">
+            <div
+              ref={bodyRef}
+              style={{ '--waven-split': `${splitValue}%` } as CSSProperties}
+              className={cn(
+                'grid flex-1 min-h-0 grid-cols-1 gap-5 lg:gap-6 items-stretch overflow-y-auto overscroll-contain waven-scroll pr-1 -mr-1',
+                layout.heroPosition === 'right' && 'waven-layout-content-first',
+                layout.heroPosition === 'left' && 'waven-layout-hero-first'
+              )}
+            >
+              {layout.heroPosition === 'left' && renderHeroCard('tall')}
+
+              {/* Left Workspace Column */}
+              <div className="min-w-0 flex flex-col gap-5">
               {dockSection === 'home' && topTab === 'Discover' ? (
                 <>
                   {library.scan.running && (
@@ -1398,35 +1630,30 @@ export function WavenPlayer() {
               )}
             </div>
 
-            {/* Right Dominant Now Playing Hero Card */}
-            <div className="lg:col-span-5 flex">
-              <NowPlayingCard
-                track={currentTrack}
-                isPlaying={isPlaying}
-                currentTime={currentTime}
-                duration={duration}
-                isLiked={isCurrentLiked}
-                shuffle={shuffle}
-                repeat={repeat}
-                volume={volume}
-                muted={muted}
-                playlists={playlists}
-                queueCount={queueIds.length}
-                onTogglePlay={handleTogglePlay}
-                onPrev={handlePrev}
-                onNext={() => handleNext(false)}
-                onSeek={handleSeek}
-                onToggleLike={handleToggleLike}
-                onToggleShuffle={handleToggleShuffle}
-                onCycleRepeat={handleCycleRepeat}
-                onVolumeChange={handleVolumeChange}
-                onToggleMute={handleToggleMute}
-                onAddToPlaylist={handleAddToPlaylist}
-                onOpenQueue={() => setDockSection('library')}
-                onOpenLibrary={() => setDockSection('library')}
-                readAnalyser={readAnalyser}
-              />
+              {layout.heroPosition === 'right' && renderHeroCard('tall')}
             </div>
+
+            {layout.heroPosition === 'bottom' && (
+              <div className="shrink-0">{renderHeroCard('bar')}</div>
+            )}
+
+            {customizing &&
+              (layout.heroPosition === 'left' || layout.heroPosition === 'right') && (
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize content and now playing panels"
+                  onPointerDown={beginSplitDrag}
+                  className="absolute bottom-0 top-0 z-40 hidden w-4 -translate-x-1/2 cursor-col-resize items-center justify-center lg:flex"
+                  style={{
+                    left: `${
+                      layout.heroPosition === 'left' ? 100 - splitValue : splitValue
+                    }%`,
+                  }}
+                >
+                  <span className="h-16 w-1 rounded-full bg-white/60 shadow-[0_0_12px_rgba(255,255,255,0.45)]" />
+                </div>
+              )}
           </div>
 
           {playbackError && (
@@ -1464,8 +1691,77 @@ export function WavenPlayer() {
               </div>
             </div>
           )}
-        </motion.main>
+
+            {layout.navPosition === 'bottom' && renderPillNav('bottom')}
+          </motion.main>
+
+          {layout.dockPosition === 'right' && (
+            <div className="relative flex h-full shrink-0 items-center">
+              <LeftDock
+                side="right"
+                activeSection={dockSection}
+                onSelectSection={handleSelectSection}
+                likedCount={library.stats.liked || library.likes.size}
+                expanded={layout.dockExpanded}
+                onToggleExpanded={() =>
+                  updateLayout({ dockExpanded: !layout.dockExpanded })
+                }
+              />
+              {customizing && (
+                <LayoutDragHandle
+                  part="dock"
+                  label="Navigation"
+                  onPointerDown={beginLayoutDrag('dock')}
+                  className="absolute left-1/2 top-2 -translate-x-1/2"
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {layout.dockPosition === 'bottom' && (
+          <div className="relative w-full shrink-0">
+            <BottomDock
+              activeSection={dockSection}
+              onSelectSection={handleSelectSection}
+              likedCount={library.stats.liked || library.likes.size}
+              expanded={layout.dockExpanded}
+              onToggleExpanded={() =>
+                updateLayout({ dockExpanded: !layout.dockExpanded })
+              }
+            />
+            {customizing && (
+              <LayoutDragHandle
+                part="dock"
+                label="Navigation"
+                onPointerDown={beginLayoutDrag('dock')}
+                className="absolute -top-3 left-1/2 -translate-x-1/2"
+              />
+            )}
+          </div>
+        )}
       </div>
+
+      <MobileDock
+        activeSection={dockSection}
+        onSelectSection={handleSelectSection}
+        likedCount={library.stats.liked || library.likes.size}
+      />
+
+      {customizing && !dragPart && (
+        <LayoutToolbar
+          layout={layout}
+          split={splitValue}
+          onLayoutChange={updateLayout}
+          onSplitChange={setDraftSplitValue}
+          onSplitCommit={commitDraftSplit}
+          onReset={resetLayout}
+          onDone={() => setCustomizing(false)}
+        />
+      )}
+      {dragPart && (
+        <LayoutDropZones part={dragPart} hovered={hoverZone} onHover={setHoverZone} />
+      )}
     </div>
   );
 }

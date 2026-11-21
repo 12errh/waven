@@ -21,6 +21,7 @@ export {
     ArtistPage,
     FolderImportResult,
     Genre,
+    LayoutSettings,
     LibraryStats,
     PlayerSession,
     PlayerState,

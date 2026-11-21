@@ -49,6 +49,18 @@
   transition: background-color 500ms ease;
 }
 
+/* Layout editor: when the player sits beside the content, the content column
+   width comes from the user's saved split (35–75%). */
+@media (min-width: 1024px) {
+  .waven-layout-content-first {
+    grid-template-columns: var(--waven-split, 58%) minmax(0, 1fr);
+  }
+
+  .waven-layout-hero-first {
+    grid-template-columns: minmax(0, 1fr) var(--waven-split, 58%);
+  }
+}
+
 .waven-app[data-window-mode='pure'] {
   background-color: transparent;
   background-image: none;
