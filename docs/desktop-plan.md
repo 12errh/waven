@@ -1,7 +1,7 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phases 0–4 complete; Phase 5 next
-**Date:** 2026-11-19
+**Status:** Phases 0–5 complete; Phase 6 next
+**Date:** 2026-11-21
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
 
@@ -131,11 +131,17 @@ waven/
 │  ├─ media/
 │  │  └─ server.go
 │  ├─ desktop/
-│  │  ├─ tray.go
-│  │  ├─ windows.go
-│  │  └─ transparency.go
-│  └─ settings/
-│     └─ settings.go
+│  │  ├─ desktop.go                # window, tray, bounds, settings apply hook
+│  │  ├─ library.go
+│  │  ├─ player.go
+│  │  ├─ settings.go
+│  │  ├─ window.go                 # Show/Hide/Quit/Info/Mini surface
+│  │  ├─ bounds.go                 # full and mini placement fitting
+│  │  ├─ tray_linux.go
+│  │  ├─ autostart_*.go
+│  │  ├─ transparency*.go
+│  │  └─ probe.go
+│  └─ *_test.go
 ├─ build/                        # icons, installer assets, platform manifests
 ├─ docs/
 │  └─ desktop-plan.md
@@ -507,6 +513,17 @@ Session JSON:
 - Single instance: a second launch shows and focuses the existing window.
 - Autostart is optional and off by default. `--hidden` starts in the tray.
 
+### 8.1.1 Layout customizer
+
+- The header opens an edit mode; slots (hero, featured, queue, visualizer, list) can be
+  dragged between drop zones, and the player can sit beside the content at a saved split
+  width.
+- The layout is stored as one JSON row (`ui.layout`) and validated on both sides:
+  `frontend/lib/layout.ts` and `internal/desktop/settings.go` accept the same slot ids,
+  orderings, and 35–75% split range.
+- An invalid or older payload falls back to the default layout instead of breaking the
+  shell.
+
 ### 8.2 Transparency
 
 | Platform | Window option | Native blur | Fallback |
@@ -566,14 +583,20 @@ Behavior:
 
 ### 8.4 Mini player
 
-- Window resizes to ~380×128.
-- Always on top by default.
+- Window resizes to ~380×128 (min 320×112, max 560×220).
+- Always on top by default, honouring `app.alwaysOnTopMini`.
 - Cover, title, artist, transport, and a thin progress bar.
-- Drag strip on the strip itself.
-- Double-click or Esc expands to the full window; the previous full-window bounds are
-  restored.
-- Same React state and audio engine; only the layout changes.
-- A tray item and a keyboard shortcut can toggle it.
+- Drag strip on the strip itself; controls opt out with `.wails-no-drag`.
+- Double-click, Esc, the header button (`M`), or the tray item expands to the full window;
+  the previous full-window bounds are restored.
+- Same React state and audio engine; only the layout changes, so expanding resumes the same
+  second of the same track.
+- Placement lives in its own `window.miniBounds` row, so shrinking never overwrites
+  `window.bounds`. A saved mini placement is reused when it is still fully on screen, and
+  otherwise the player docks to the bottom-right of the primary work area.
+- Mini mode itself is not persisted: launching always opens the full player.
+- The browser preview flips the same flag in memory, so `/` can render the compact layout
+  without the native shell.
 
 ---
 
@@ -784,16 +807,27 @@ a single ↑/↓/Enter/Esc cursor, playlist create/rename/delete, add/remove/reo
 feedback, and the drop overlay; `go test ./...`, `npm test`, `npm run build`, and
 `wails3 task build` all pass.
 
-### Phase 5 — Mini player and polish (1–2 days)
+### Phase 5 — Mini player and polish (1–2 days) ✅
 
-- [ ] Mini window resize, bounds restore, always-on-top.
-- [ ] Compact layout with cover, title, transport, progress.
-- [ ] Expand/collapse via double-click, Esc, tray.
-- [ ] Focus states, reduced-motion support, contrast pass on all three modes.
-- [ ] Final empty/loading/error states.
+- [x] Mini window resize, bounds restore, always-on-top.
+- [x] Compact layout with cover, title, transport, progress.
+- [x] Expand/collapse via double-click, Esc, tray.
+- [x] Focus states, reduced-motion support, contrast pass on all three modes.
+- [x] Final empty/loading/error states.
 
 **Done when:** mini mode works from the tray and keyboard, expands cleanly, and the Glass,
 Pure, and Solid modes are all legible over bright and dark wallpapers.
+
+Verified by `internal/desktop/bounds_test.go` (mini docking, saved-placement reuse, monitor
+changes, size clamps, primary work area) and `internal/desktop/settings_test.go`
+(`window.miniBounds` round-trip isolated from `window.bounds`, apply-hook delivery on both a
+successful write and an autostart rollback). `go test ./...`, `npm test` (15 cases including
+the compact geometry contract), `npx tsc --noEmit`, `npm run lint`, and `npm run build` pass.
+A browser-preview run confirmed the real toggle path: the header control swaps to the
+compact shell, the title and transport stay live, the like control drops out below 360px,
+and Esc restores the full layout. `WAVEN_SMOKE=1` now enters the mini player, probes
+`data-window-layout` and the live title, keeps the audio check running, and expands with Esc.
+The always-on-top preference is pushed to the live window through the settings apply hook.
 
 ### Phase 6 — Packaging and CI (2–3 days)
 

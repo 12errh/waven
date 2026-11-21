@@ -33,12 +33,14 @@ type Desktop struct {
 	trayLock      sync.Mutex
 	trayTrack     *application.MenuItem
 	trayPlayPause *application.MenuItem
+	trayMini      *application.MenuItem
 	nowPlaying    PlayerState
 	trayLabel     string
 	quitting      atomic.Bool
 	started       atomic.Bool
 	trayAvailable atomic.Bool
 	maximized     atomic.Bool
+	mini          atomic.Bool
 
 	settings    *SettingsService
 	library     *LibraryService
@@ -267,6 +269,9 @@ func (d *Desktop) registerWindowStateHooks(window *application.WebviewWindow) {
 		d.scheduleSaveBounds(450 * time.Millisecond)
 	})
 	window.RegisterHook(events.Common.WindowMaximise, func(*application.WindowEvent) {
+		if d.mini.Load() {
+			return
+		}
 		width, height := window.Size()
 		d.boundsLock.Lock()
 		normal := d.normalBounds
@@ -289,6 +294,9 @@ func (d *Desktop) registerWindowStateHooks(window *application.WebviewWindow) {
 		d.scheduleSaveBounds(50 * time.Millisecond)
 	})
 	window.RegisterHook(events.Common.WindowUnMaximise, func(*application.WindowEvent) {
+		if d.mini.Load() {
+			return
+		}
 		d.debugf("window unmaximised")
 		d.maximized.Store(false)
 		d.scheduleSaveBounds(250 * time.Millisecond)
@@ -339,6 +347,10 @@ func (d *Desktop) createTray() {
 	menu.Add("Hide WAVEN").OnClick(func(*application.Context) {
 		d.Hide()
 	})
+	d.trayMini = menu.Add("Mini Player")
+	d.trayMini.OnClick(func(*application.Context) {
+		d.ToggleMini()
+	})
 	menu.AddSeparator()
 	menu.Add("Quit WAVEN").OnClick(func(*application.Context) {
 		d.Quit()
@@ -351,6 +363,7 @@ func (d *Desktop) createTray() {
 
 	d.tray = tray
 	d.applyNowPlayingLocked()
+	d.applyMiniLabelLocked()
 }
 
 // SetNowPlaying updates the tray's track and transport labels. It is called by
@@ -442,6 +455,152 @@ func (d *Desktop) Toggle() {
 	d.Show()
 }
 
+// IsMini reports whether the window is currently the compact player.
+func (d *Desktop) IsMini() bool {
+	return d.mini.Load()
+}
+
+// ShowMini switches to the compact player. It is safe to call repeatedly: the
+// first call resizes, and later calls simply bring the window forward.
+func (d *Desktop) ShowMini() {
+	d.setMini(true)
+}
+
+// ShowFull expands the mini player back to the saved full-window placement.
+func (d *Desktop) ShowFull() {
+	d.setMini(false)
+}
+
+// ToggleMini switches between the compact player and the full window.
+func (d *Desktop) ToggleMini() {
+	d.setMini(!d.mini.Load())
+}
+
+// SetAlwaysOnTop pins or unpins the window. The settings screen calls this so a
+// preference change reaches the live mini player without a restart.
+func (d *Desktop) SetAlwaysOnTop(onTop bool) {
+	if d.window == nil {
+		return
+	}
+	d.window.SetAlwaysOnTop(onTop)
+}
+
+// ApplySettings reacts to a preference write. Only the always-on-top choice
+// affects a live window; every other setting is read when it is needed.
+func (d *Desktop) ApplySettings(settings AppSettings) {
+	if d.window == nil || !d.mini.Load() {
+		return
+	}
+	d.window.SetAlwaysOnTop(settings.AlwaysOnTopMini)
+}
+
+func (d *Desktop) setMini(mini bool) {
+	if d.window == nil {
+		return
+	}
+	if d.mini.Load() == mini {
+		d.Show()
+		return
+	}
+	if mini {
+		d.enterMini()
+		return
+	}
+	d.exitMini()
+}
+
+// enterMini shrinks the window to the compact player. The full placement is
+// saved first so expanding restores exactly where the user left it.
+func (d *Desktop) enterMini() {
+	d.saveBoundsNow()
+
+	saved, hasSaved := WindowBounds{}, false
+	if d.settings != nil {
+		saved, hasSaved = d.settings.miniBounds()
+	}
+
+	var rect application.Rect
+	ok := false
+	if d.app != nil {
+		rect, ok = fitMiniBounds(saved, hasSaved, d.app.Screen.GetAll())
+	}
+	if !ok {
+		// No display information: keep the current top-left corner and shrink
+		// in place rather than refusing the command.
+		x, y := d.window.Position()
+		rect = application.Rect{X: x, Y: y, Width: miniWindowWidth, Height: miniWindowHeight}
+		d.debugf("mini: no display information; shrinking in place")
+	}
+
+	d.mini.Store(true)
+	// A maximised window ignores SetBounds, and mini mode is never maximised.
+	if d.window.IsMaximised() {
+		d.maximized.Store(false)
+		d.window.UnMaximise()
+	}
+	// The full window has a 960x640 minimum, which would clamp the compact
+	// size away. Lower it for the duration of mini mode.
+	d.window.SetMinSize(miniWindowMinWidth, miniWindowMinHeight)
+	d.window.SetBounds(rect)
+
+	onTop := true
+	if d.settings != nil {
+		onTop = d.settings.alwaysOnTopMini()
+	}
+	d.window.SetAlwaysOnTop(onTop)
+	d.debugf("mini: %dx%d at %d,%d onTop=%v", rect.Width, rect.Height, rect.X, rect.Y, onTop)
+
+	d.window.Show()
+	d.window.Focus()
+	d.emitMini(true)
+}
+
+// exitMini restores the full window and clears the mini-only window flags.
+func (d *Desktop) exitMini() {
+	d.saveMiniBoundsNow()
+	d.mini.Store(false)
+	d.window.SetAlwaysOnTop(false)
+	d.window.SetMinSize(minimumWindowWidth, minimumWindowHeight)
+	if !d.applyFullBounds() {
+		d.fitToScreen()
+	}
+	fullWidth, fullHeight := d.window.Size()
+	d.debugf("mini: expanded to %dx%d", fullWidth, fullHeight)
+	d.window.Show()
+	d.window.Focus()
+	d.emitMini(false)
+}
+
+// MiniState is the payload of the window:mini event. The frontend renders the
+// compact layout when Mini is true, wherever the switch came from (tray, the
+// header button, or a keyboard shortcut).
+type MiniState struct {
+	Mini bool `json:"mini"`
+}
+
+func (d *Desktop) emitMini(mini bool) {
+	d.trayLock.Lock()
+	d.applyMiniLabelLocked()
+	d.trayLock.Unlock()
+	if d.app == nil {
+		return
+	}
+	d.app.Event.Emit("window:mini", MiniState{Mini: mini})
+}
+
+// applyMiniLabelLocked keeps the tray item naming the action it performs. The
+// caller must hold trayLock.
+func (d *Desktop) applyMiniLabelLocked() {
+	if d.trayMini == nil {
+		return
+	}
+	if d.mini.Load() {
+		d.trayMini.SetLabel("Full Player")
+		return
+	}
+	d.trayMini.SetLabel("Mini Player")
+}
+
 // Quit exits the process, including any playback running in the background.
 func (d *Desktop) Quit() {
 	d.saveBoundsNow()
@@ -459,37 +618,9 @@ func (d *Desktop) restoreWindow() {
 
 	deadline := time.Now().Add(8 * time.Second)
 	for {
-		screens := d.app.Screen.GetAll()
-		if len(screens) > 0 {
-			saved, hasSaved := WindowBounds{}, false
-			if d.settings != nil {
-				saved, hasSaved = d.settings.windowBounds()
-			}
-			rect, ok := fitWindowBounds(
-				saved,
-				hasSaved,
-				screens,
-				defaultWindowWidth,
-				defaultWindowHeight,
-				minimumWindowWidth,
-				minimumWindowHeight,
-			)
-			if !ok {
+		if len(d.app.Screen.GetAll()) > 0 {
+			if !d.applyFullBounds() {
 				d.fitToScreen()
-				return
-			}
-			d.debugf("restoring window bounds %dx%d at %d,%d (saved=%v maximized=%v) visible=%v",
-				rect.Width, rect.Height, rect.X, rect.Y, hasSaved, hasSaved && saved.Maximized, d.window.IsVisible())
-			d.setNormalBounds(rect)
-			d.maximized.Store(hasSaved && saved.Maximized)
-			d.window.SetBounds(rect)
-			d.debugf("restored bounds visible=%v", d.window.IsVisible())
-			if hasSaved && saved.Maximized {
-				d.window.Maximise()
-			} else if d.window.IsMaximised() {
-				// Some compositors auto-maximise a window that fills the work
-				// area while it maps. The saved state is normal, so undo it.
-				d.window.UnMaximise()
 			}
 			return
 		}
@@ -499,6 +630,51 @@ func (d *Desktop) restoreWindow() {
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
+}
+
+// applyFullBounds restores the saved full-window placement against the
+// monitors that are currently connected. It returns false when the screen
+// manager cannot describe a display yet.
+func (d *Desktop) applyFullBounds() bool {
+	if d.window == nil {
+		return false
+	}
+	screens := d.app.Screen.GetAll()
+	if len(screens) == 0 {
+		return false
+	}
+
+	saved, hasSaved := WindowBounds{}, false
+	if d.settings != nil {
+		saved, hasSaved = d.settings.windowBounds()
+	}
+	rect, ok := fitWindowBounds(
+		saved,
+		hasSaved,
+		screens,
+		defaultWindowWidth,
+		defaultWindowHeight,
+		minimumWindowWidth,
+		minimumWindowHeight,
+	)
+	if !ok {
+		return false
+	}
+
+	d.debugf("restoring window bounds %dx%d at %d,%d (saved=%v maximized=%v) visible=%v",
+		rect.Width, rect.Height, rect.X, rect.Y, hasSaved, hasSaved && saved.Maximized, d.window.IsVisible())
+	d.setNormalBounds(rect)
+	d.maximized.Store(hasSaved && saved.Maximized)
+	d.window.SetBounds(rect)
+	d.debugf("restored bounds visible=%v", d.window.IsVisible())
+	if hasSaved && saved.Maximized {
+		d.window.Maximise()
+	} else if d.window.IsMaximised() {
+		// Some compositors auto-maximise a window that fills the work
+		// area while it maps. The saved state is normal, so undo it.
+		d.window.UnMaximise()
+	}
+	return true
 }
 
 // fitToScreen keeps the default window size on large displays, but shrinks it
@@ -576,6 +752,13 @@ func (d *Desktop) saveBoundsNow() {
 		return
 	}
 
+	// While the compact player is active its placement belongs in
+	// window.miniBounds. The full-window row keeps the placement to return to.
+	if d.mini.Load() {
+		d.saveMiniBoundsNow()
+		return
+	}
+
 	maximized := d.maximized.Load()
 	if !maximized && !d.window.IsMaximised() {
 		bounds := d.window.Bounds()
@@ -600,6 +783,22 @@ func (d *Desktop) saveBoundsNow() {
 	}
 	if err := d.settings.saveWindowBounds(saved); err != nil {
 		log.Printf("save window bounds: %v", err)
+	}
+}
+
+// saveMiniBoundsNow persists the compact placement and size so the user's
+// corner survives a relaunch. Mini bounds are never maximised.
+func (d *Desktop) saveMiniBoundsNow() {
+	if d.window == nil || d.settings == nil {
+		return
+	}
+	bounds := d.window.Bounds()
+	if bounds.Width <= 0 || bounds.Height <= 0 {
+		return
+	}
+	saved := WindowBounds{X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height}
+	if err := d.settings.saveMiniBounds(saved); err != nil {
+		log.Printf("save mini bounds: %v", err)
 	}
 }
 
@@ -740,6 +939,32 @@ func (d *Desktop) smokeTest() {
 	log.Printf("smoke: returning to Discover")
 	d.window.ExecJS(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to Discover'))?.click()`)
 	time.Sleep(800 * time.Millisecond)
+
+	// Mini player: the window must shrink, keep the page alive, and report the
+	// compact layout so the frontend swaps its shell. Expanding must restore the
+	// full-window placement and clear always-on-top.
+	log.Printf("smoke: entering the mini player")
+	d.ShowMini()
+	time.Sleep(900 * time.Millisecond)
+	miniWidth, miniHeight := d.window.Size()
+	miniSaved, _ := d.settings.miniBounds()
+	log.Printf("smoke: mini size=%dx%d savedMini=%dx%d onTop=%v",
+		miniWidth, miniHeight, miniSaved.Width, miniSaved.Height, d.IsMini())
+	d.window.ExecJS(`(() => {
+		const root = document.querySelector('[data-window-layout]');
+		const title = document.querySelector('[data-mini-title]')?.textContent ?? 'missing';
+		fetch('/waven-probe?layout=' + encodeURIComponent(root?.getAttribute('data-window-layout') ?? 'missing') +
+			'&miniTitle=' + encodeURIComponent(title));
+	})()`)
+	time.Sleep(500 * time.Millisecond)
+	probeAudio("mini")
+
+	log.Printf("smoke: expanding from the mini player with Esc")
+	d.window.ExecJS(`document.querySelector('[data-window-layout]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+	time.Sleep(900 * time.Millisecond)
+	fullWidth, fullHeight := d.window.Size()
+	log.Printf("smoke: expanded size=%dx%d mini=%v visible=%v",
+		fullWidth, fullHeight, d.IsMini(), d.window.IsVisible())
 
 	log.Printf("smoke: clicking the minimise control")
 	d.window.ExecJS(`document.querySelector('[aria-label="Minimise window"]')?.click()`)

@@ -53,6 +53,13 @@ export interface LibraryController {
   /** True when the browser fixture stands in for the Wails bridge. */
   preview: boolean;
   error: string | null;
+  /**
+   * Set only when the first load never reached the library at all. Unlike
+   * `error` (which is toasted and cleared), this keeps the retry surface on
+   * screen until a load succeeds.
+   */
+  loadError: string | null;
+  retry: () => Promise<void>;
   clearError: () => void;
   folders: Folder[];
   stats: LibraryStats;
@@ -123,6 +130,7 @@ export function useLibrary(): LibraryController {
   const [api, setApi] = useState<LibraryApi | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stats, setStats] = useState<LibraryStats>(EMPTY_STATS);
   const [recent, setRecent] = useState<Track[]>([]);
@@ -194,11 +202,47 @@ export function useLibrary(): LibraryController {
     [upsertTracks]
   );
 
+  // Event subscriptions are owned by a ref so a retry after a failed first load
+  // can re-register them without duplicating listeners.
+  const subscriptionsRef = useRef<Array<() => void>>([]);
+
+  const unsubscribe = useCallback(() => {
+    for (const off of subscriptionsRef.current) off();
+    subscriptionsRef.current = [];
+  }, []);
+
+  const subscribe = useCallback(
+    (client: LibraryApi) => {
+      unsubscribe();
+      subscriptionsRef.current = [
+        client.onScanProgress((progress) => {
+          setScan((current) => ({
+            ...current,
+            running: progress.phase !== 'done' && progress.phase !== 'idle',
+            progress,
+          }));
+        }),
+        client.onScanDone((summary) => {
+          setScan({ running: false, progress: IDLE_PROGRESS, last: summary });
+          void refreshCollections(client);
+        }),
+        client.onLibraryDrop((outcome) => {
+          setDrop(outcome);
+          if (outcome.result?.folders?.length) {
+            setFolders((current) => {
+              const seen = new Set(current.map((folder) => folder.id));
+              return [...current, ...outcome.result.folders.filter((folder) => !seen.has(folder.id))];
+            });
+          }
+          void refreshCollections(client);
+        }),
+      ];
+    },
+    [refreshCollections, unsubscribe]
+  );
+
   useEffect(() => {
     let closed = false;
-    let offProgress: (() => void) | undefined;
-    let offDone: (() => void) | undefined;
-    let offDrop: (() => void) | undefined;
 
     void (async () => {
       try {
@@ -234,55 +278,40 @@ export function useLibrary(): LibraryController {
           upsertTracks(recentResult.value.tracks);
         }
         if (playlistResult.status === 'fulfilled') setPlaylists(playlistResult.value);
-        const failure = [
+        const settled = [
           folderResult,
           statsResult,
           likedResult,
           statusResult,
           recentResult,
           playlistResult,
-        ].find((result) => result.status === 'rejected');
+        ];
+        const failure = settled.find((result) => result.status === 'rejected');
         if (failure && failure.status === 'rejected') {
           setError(errorMessage(failure.reason));
         }
+        // One failing collection is a degraded view; every collection failing
+        // means the library never loaded and the retry surface is needed.
+        if (settled.every((result) => result.status === 'rejected') && failure?.status === 'rejected') {
+          setLoadError(errorMessage(failure.reason));
+        }
 
-        offProgress = client.onScanProgress((progress) => {
-          setScan((current) => ({
-            ...current,
-            running: progress.phase !== 'done' && progress.phase !== 'idle',
-            progress,
-          }));
-        });
-        offDone = client.onScanDone((summary) => {
-          setScan({ running: false, progress: IDLE_PROGRESS, last: summary });
-          void refreshCollections(client);
-        });
-        offDrop = client.onLibraryDrop((outcome) => {
-          setDrop(outcome);
-          if (outcome.result?.folders?.length) {
-            setFolders((current) => {
-              const seen = new Set(current.map((folder) => folder.id));
-              return [...current, ...outcome.result.folders.filter((folder) => !seen.has(folder.id))];
-            });
-          }
-          void refreshCollections(client);
-        });
+        subscribe(client);
 
         setReady(true);
       } catch (loadError) {
         if (closed) return;
         setError(errorMessage(loadError));
+        setLoadError(errorMessage(loadError));
         setReady(true);
       }
     })();
 
     return () => {
       closed = true;
-      offProgress?.();
-      offDone?.();
-      offDrop?.();
+      unsubscribe();
     };
-  }, [refreshCollections, upsertTracks]);
+  }, [refreshCollections, subscribe, unsubscribe, upsertTracks]);
 
   const loadTracks = useCallback(
     async (query: Partial<TrackQuery>) => {
@@ -387,6 +416,24 @@ export function useLibrary(): LibraryController {
     if (!api) return;
     await refreshCollections(api);
   }, [api, refreshCollections]);
+
+  // Retry is the recovery path for the error panel: it re-probes the bridge and
+  // reloads the collections, so a launch that raced the database can recover
+  // without restarting the app.
+  const retry = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const client = api ?? (await getLibraryApi());
+      // A real probe, unlike refreshCollections which tolerates partial failure.
+      await client.getStats();
+      setApi(client);
+      await refreshCollections(client);
+      subscribe(client);
+      setReady(true);
+    } catch (retryError) {
+      setLoadError(errorMessage(retryError));
+    }
+  }, [api, refreshCollections, subscribe]);
 
   const addFolder = useCallback(async () => {
     if (!api) return false;
@@ -700,6 +747,8 @@ export function useLibrary(): LibraryController {
       ready,
       preview: api?.preview ?? false,
       error,
+      loadError,
+      retry,
       clearError,
       folders,
       stats,
@@ -740,6 +789,8 @@ export function useLibrary(): LibraryController {
       ready,
       api,
       error,
+      loadError,
+      retry,
       clearError,
       folders,
       stats,

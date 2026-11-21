@@ -14,10 +14,10 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import { motion } from 'motion/react';
-import { AlertCircle, FolderPlus, LayoutGrid, Loader2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, FolderPlus, LayoutGrid, Loader2, X } from 'lucide-react';
 import { PlayerEngine, type PlaybackError } from '@/lib/player-engine';
 import { getPlayerApi } from '@/lib/player-api';
-import { loadDesktopRuntime } from '@/lib/desktop-runtime';
+import { loadDesktopRuntime, runWindowAction } from '@/lib/desktop-runtime';
 import {
   buildShuffleOrder,
   clampResumeSeconds,
@@ -40,6 +40,7 @@ import type {
 import { useLibrary } from '@/lib/use-library';
 import { useSettings } from '@/lib/use-settings';
 import { cn } from '@/lib/utils';
+import { getWindowApi } from '@/lib/window-api';
 import {
   DEFAULT_LAYOUT,
   clampSplit,
@@ -57,6 +58,8 @@ import {
 import { DesktopControls } from './DesktopControls';
 import { FeaturedCardsRow } from './FeaturedCardsRow';
 import { LayoutDragHandle, LayoutDropZones, LayoutToolbar } from './LayoutCustomizer';
+import { LibrarySkeleton } from './LibrarySkeleton';
+import { MiniPlayer } from './MiniPlayer';
 import { BottomDock, LeftDock, MobileDock } from './LeftDock';
 import { NowPlayingCard } from './NowPlayingCard';
 import { SecondaryViews } from './SecondaryViews';
@@ -132,6 +135,7 @@ export function WavenPlayer() {
 
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [playbackError, setPlaybackError] = useState<PlaybackError | null>(null);
+  const [mini, setMini] = useState(false);
 
   const layout = settings.settings.layout;
   const [customizing, setCustomizing] = useState(false);
@@ -257,6 +261,7 @@ export function WavenPlayer() {
 
   const engineRef = useRef<PlayerEngine | null>(null);
   const playerApiRef = useRef<Awaited<ReturnType<typeof getPlayerApi>> | null>(null);
+  const windowApiRef = useRef<Awaited<ReturnType<typeof getWindowApi>> | null>(null);
   const restoredRef = useRef(false);
   const loadedTrackIdRef = useRef<number | null>(null);
   const resumeRef = useRef<{ trackId: number; seconds: number } | null>(null);
@@ -276,6 +281,7 @@ export function WavenPlayer() {
   const repeatRef = useRef<RepeatMode>('off');
   const volumeRef = useRef(0.8);
   const mutedRef = useRef(false);
+  const miniRef = useRef(false);
 
   const listenedMsRef = useRef(0);
   const recordedRef = useRef(false);
@@ -513,6 +519,53 @@ export function WavenPlayer() {
       closed = true;
     };
   }, []);
+
+  // The compact player is a native window mode, not a route. Go emits
+  // `window:mini` for every switch (tray, header button, shortcut) so the shell
+  // and the window can never disagree about which layout is on screen.
+  useEffect(() => {
+    let closed = false;
+    let off: (() => void) | undefined;
+    void (async () => {
+      try {
+        const api = await getWindowApi();
+        if (closed) return;
+        windowApiRef.current = api;
+        const current = await api.isMini();
+        if (closed) return;
+        miniRef.current = current;
+        setMini(current);
+        off = api.onMiniChange((next) => {
+          miniRef.current = next;
+          setMini(next);
+        });
+      } catch {
+        // Without a window bridge the full layout stays mounted.
+      }
+    })();
+    return () => {
+      closed = true;
+      off?.();
+    };
+  }, []);
+
+  const expandMini = useCallback(() => {
+    void windowApiRef.current?.showFull();
+  }, []);
+
+  const toggleMini = useCallback(() => {
+    const api = windowApiRef.current;
+    if (!api) return;
+    void (miniRef.current ? api.showFull() : api.showMini());
+  }, []);
+
+  // Applying the always-on-top preference needs the live window, so the shell
+  // is told whenever the preference changes while the mini player is open.
+  const alwaysOnTopMini = settings.settings.alwaysOnTopMini;
+  useEffect(() => {
+    if (!mini) return;
+    void windowApiRef.current?.setAlwaysOnTop(alwaysOnTopMini);
+  }, [mini, alwaysOnTopMini]);
 
   const currentTrack: Track | null =
     currentTrackId === null
@@ -1207,9 +1260,24 @@ export function WavenPlayer() {
         }, 0);
         return;
       }
+      if (event.key === 'Escape' && miniRef.current) {
+        event.preventDefault();
+        expandMini();
+        return;
+      }
       if (event.key === 'Escape') {
         setDockSection('home');
         setTopTab('Discover');
+        return;
+      }
+      if (
+        (event.key === 'm' || event.key === 'M') &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        toggleMini();
         return;
       }
       if (event.code === 'Space') {
@@ -1235,6 +1303,8 @@ export function WavenPlayer() {
     handlePrev,
     handleToggleLike,
     handleSeek,
+    expandMini,
+    toggleMini,
     currentTrack,
     currentTime,
     duration,
@@ -1270,7 +1340,6 @@ export function WavenPlayer() {
     currentTrack !== null && (library.likes.has(currentTrack.id) || currentTrack.liked);
 
   const showDiscoverEmpty = library.ready && library.recent.length === 0;
-
   const handleSelectSection = useCallback((section: DockSection) => {
     setDockSection(section);
     if (section === 'home') setTopTab('Discover');
@@ -1343,8 +1412,32 @@ export function WavenPlayer() {
     </div>
   );
 
+  // Compact window. The audio engine and every playback ref stay mounted, so
+  // expanding restores the exact position and queue.
+  if (mini) {
+    return (
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        isLiked={isCurrentLiked}
+        onTogglePlay={handleTogglePlay}
+        onPrev={handlePrev}
+        onNext={() => handleNext(false)}
+        onSeek={handleSeek}
+        onToggleLike={() => {
+          if (currentTrack) handleToggleLike(currentTrack.id);
+        }}
+        onExpand={expandMini}
+        onHide={() => void runWindowAction('close')}
+      />
+    );
+  }
+
   return (
     <div
+      data-window-layout="full"
       data-window-mode={windowMode}
       data-file-drop-target="waven-library"
       onDragOver={handleDragOver}
@@ -1458,6 +1551,7 @@ export function WavenPlayer() {
               <DesktopControls
                 mode={windowMode}
                 onModeChange={(mode) => void settings.update({ windowMode: mode })}
+                onMini={toggleMini}
               />
             </div>
           </header>
@@ -1529,7 +1623,35 @@ export function WavenPlayer() {
                     </div>
                   )}
 
-                  {showDiscoverEmpty ? (
+                  {library.loadError ? (
+                    <section
+                      role="alert"
+                      className="flex flex-col items-center gap-4 rounded-[26px] border border-red-300/25 bg-red-500/[0.08] p-8 text-center backdrop-blur-2xl"
+                    >
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-red-300/25 bg-red-400/10">
+                        <AlertTriangle className="h-7 w-7 text-red-200" />
+                      </div>
+                      <div className="max-w-sm space-y-1.5">
+                        <h2 className="font-display text-lg font-semibold text-white">
+                          Your library didn&apos;t load
+                        </h2>
+                        <p className="text-xs leading-relaxed text-white/70">{library.loadError}</p>
+                        <p className="text-[11px] leading-relaxed text-white/50">
+                          WAVEN keeps its index on this device. Retrying re-reads it without
+                          rescanning your folders.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void library.retry()}
+                        className="rounded-full bg-white px-5 py-2.5 text-xs font-semibold text-[#090b10] transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                      >
+                        Try again
+                      </button>
+                    </section>
+                  ) : !library.ready ? (
+                    <LibrarySkeleton />
+                  ) : showDiscoverEmpty ? (
                     <section className="rounded-[26px] bg-white/[0.045] backdrop-blur-2xl border border-white/[0.1] p-8 text-center flex flex-col items-center gap-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                       <div className="w-16 h-16 rounded-2xl bg-white/[0.07] border border-white/10 flex items-center justify-center">
                         <FolderPlus className="w-7 h-7 text-white/60" />

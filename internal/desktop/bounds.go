@@ -2,6 +2,19 @@ package desktop
 
 import "github.com/wailsapp/wails/v3/pkg/application"
 
+// Mini player geometry. The compact window keeps the cover, track, and
+// transport visible without the full shell. These numbers are mirrored by
+// frontend/lib/mini.ts; keep the two in sync.
+const (
+	miniWindowWidth     = 380
+	miniWindowHeight    = 128
+	miniWindowMinWidth  = 320
+	miniWindowMinHeight = 112
+	miniWindowMaxWidth  = 560
+	miniWindowMaxHeight = 220
+	miniWindowMargin    = 24
+)
+
 // WindowBounds is the persisted placement of the main window. Width and
 // Height describe the normal (restored) window, never the maximised frame, so
 // leaving maximised mode returns the window to the size the user chose.
@@ -93,6 +106,74 @@ func fitWindowBounds(
 	}
 
 	return application.Rect{X: x, Y: y, Width: width, Height: height}, true
+}
+
+// fitMiniBounds places the compact player. A saved placement that is still
+// fully visible on a connected display is honoured, so the user's corner
+// survives a relaunch. Anything else docks to the bottom-right of the primary
+// work area, clear of the window edge and the taskbar.
+func fitMiniBounds(saved WindowBounds, hasSaved bool, screens []*application.Screen) (application.Rect, bool) {
+	if len(screens) == 0 {
+		return application.Rect{}, false
+	}
+
+	primary := screens[0]
+	for _, screen := range screens {
+		if screen != nil && screen.IsPrimary {
+			primary = screen
+			break
+		}
+	}
+	if primary == nil {
+		return application.Rect{}, false
+	}
+
+	width, height := miniWindowWidth, miniWindowHeight
+	if hasSaved && saved.Width > 0 && saved.Height > 0 {
+		width = clampInt(saved.Width, miniWindowMinWidth, miniWindowMaxWidth)
+		height = clampInt(saved.Height, miniWindowMinHeight, miniWindowMaxHeight)
+		savedRect := application.Rect{X: saved.X, Y: saved.Y, Width: width, Height: height}
+		if fullyVisibleOn(savedRect, screens) {
+			return savedRect, true
+		}
+	}
+
+	work := primary.WorkArea
+	if work.Width <= 0 || work.Height <= 0 {
+		work = primary.Bounds
+	}
+	if work.Width <= 0 || work.Height <= 0 {
+		return application.Rect{}, false
+	}
+
+	x := work.X + work.Width - width - miniWindowMargin
+	y := work.Y + work.Height - height - miniWindowMargin
+	x = clampInt(x, work.X, work.X+work.Width-width)
+	y = clampInt(y, work.Y, work.Y+work.Height-height)
+	return application.Rect{X: x, Y: y, Width: width, Height: height}, true
+}
+
+// fullyVisibleOn reports whether the whole rectangle sits inside one display's
+// work area. Without it a saved mini player would follow a disconnected monitor
+// off-screen.
+func fullyVisibleOn(rect application.Rect, screens []*application.Screen) bool {
+	area := rect.Width * rect.Height
+	if area <= 0 {
+		return false
+	}
+	for _, screen := range screens {
+		if screen == nil {
+			continue
+		}
+		work := screen.WorkArea
+		if work.Width <= 0 || work.Height <= 0 {
+			work = screen.Bounds
+		}
+		if intersectionArea(rect, work) == area {
+			return true
+		}
+	}
+	return false
 }
 
 func intersectionArea(a, b application.Rect) int {

@@ -1,6 +1,16 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    /* Motion tokens: the shell's transitions read from these so the reduced
+       motion rule below only has to zero one scale. */
+    --waven-motion-scale: 1;
+    --waven-duration-fast: 120ms;
+    --waven-duration-base: 200ms;
+    --waven-duration-slow: 500ms;
+    --waven-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
   html,
   body {
     background-color: transparent;
@@ -64,6 +74,9 @@
 .waven-app[data-window-mode='pure'] {
   background-color: transparent;
   background-image: none;
+  /* Nothing sits between the text and the desktop wallpaper in this mode, so a
+     soft shadow keeps white-on-light-wallpaper readable. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }
 
 .waven-app[data-window-mode='pure'] .waven-ambient {
@@ -77,6 +90,43 @@
 
 .waven-ambient {
   transition: opacity 500ms ease;
+}
+
+/* First-load placeholder blocks. The pulse is the only motion, so the reduced
+   motion rule below simply stops it. */
+.library-skeleton-block {
+  background-color: rgba(255, 255, 255, 0.08);
+  animation: waven-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes waven-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion: keep state changes instant instead of animating them. The
+   player engine and visualizer also check this query in JS. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --waven-motion-scale: 0;
+    --waven-duration-fast: 1ms;
+    --waven-duration-base: 1ms;
+    --waven-duration-slow: 1ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Custom sleek glass scrollbars */

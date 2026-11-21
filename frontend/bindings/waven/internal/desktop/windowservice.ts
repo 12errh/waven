@@ -32,6 +32,13 @@ export function Info(): $CancellablePromise<$models.AppInfo> {
 }
 
 /**
+ * IsMini reports whether the window is currently the mini player.
+ */
+export function IsMini(): $CancellablePromise<boolean> {
+    return $Call.ByID(3627062481);
+}
+
+/**
  * Quit exits the process, including playback. The result is returned before
  * the event loop tears down so the caller's promise settles.
  */
@@ -40,10 +47,39 @@ export function Quit(): $CancellablePromise<void> {
 }
 
 /**
+ * SetAlwaysOnTop pins or unpins the window. The mini player uses this so a
+ * preference change applies without a restart.
+ */
+export function SetAlwaysOnTop(onTop: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1859059773, onTop);
+}
+
+/**
  * Show restores and focuses the main window.
  */
 export function Show(): $CancellablePromise<void> {
     return $Call.ByID(2800781415);
+}
+
+/**
+ * ShowFull expands the mini player back to the full window.
+ */
+export function ShowFull(): $CancellablePromise<void> {
+    return $Call.ByID(3625636834);
+}
+
+/**
+ * ShowMini switches the window to the compact mini player.
+ */
+export function ShowMini(): $CancellablePromise<void> {
+    return $Call.ByID(2007415576);
+}
+
+/**
+ * ToggleMini switches between the mini player and the full window.
+ */
+export function ToggleMini(): $CancellablePromise<void> {
+    return $Call.ByID(2033188149);
 }
 
 // Private type creation functions

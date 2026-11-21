@@ -350,3 +350,95 @@ func TestSettingsClampsSplitWhenWriting(t *testing.T) {
 		t.Fatalf("Split = %d, want the default 58", saved.Layout.Split)
 	}
 }
+
+func TestMiniBoundsRoundTrip(t *testing.T) {
+	settings, st := newSettingsTestService(t)
+
+	if _, ok := settings.miniBounds(); ok {
+		t.Fatal("fresh settings should not report mini bounds")
+	}
+
+	want := WindowBounds{X: 120, Y: 240, Width: 380, Height: 128}
+	if err := settings.saveMiniBounds(want); err != nil {
+		t.Fatalf("saveMiniBounds: %v", err)
+	}
+	got, ok := settings.miniBounds()
+	if !ok {
+		t.Fatal("expected saved mini bounds")
+	}
+	if got != want {
+		t.Fatalf("mini bounds = %+v, want %+v", got, want)
+	}
+
+	// The mini placement is a separate row, so saving it never disturbs the
+	// full-window placement that expanding restores.
+	if _, ok := settings.windowBounds(); ok {
+		t.Fatal("mini bounds must not write window.bounds")
+	}
+	if err := settings.saveWindowBounds(WindowBounds{X: 10, Y: 20, Width: 1280, Height: 820}); err != nil {
+		t.Fatalf("saveWindowBounds: %v", err)
+	}
+	if got, _ := settings.miniBounds(); got != want {
+		t.Fatalf("window bounds overwrote mini bounds: %+v", got)
+	}
+
+	if err := settings.saveMiniBounds(WindowBounds{Width: 0, Height: 128}); err == nil {
+		t.Fatal("saveMiniBounds should reject a zero width")
+	}
+
+	if err := st.SetSetting(settingMiniBounds, "not json"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	if _, ok := settings.miniBounds(); ok {
+		t.Fatal("invalid JSON should be ignored")
+	}
+}
+
+func TestSettingsApplyHookReceivesWrites(t *testing.T) {
+	settings, _ := newSettingsTestService(t)
+
+	var applied []AppSettings
+	settings.SetApplyHook(func(next AppSettings) {
+		applied = append(applied, next)
+	})
+
+	if _, err := settings.Update(AppSettings{
+		WindowMode:      WindowModeGlass,
+		CloseToTray:     true,
+		AlwaysOnTopMini: false,
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(applied) != 1 {
+		t.Fatalf("hook called %d times, want 1", len(applied))
+	}
+	if applied[0].AlwaysOnTopMini {
+		t.Fatal("hook should receive the saved always-on-top choice")
+	}
+}
+
+func TestSettingsApplyHookSeesRollback(t *testing.T) {
+	settings, _ := newSettingsTestService(t)
+	settings.applyAutostart = func(bool, bool) error {
+		return errors.New("login item unavailable")
+	}
+
+	var applied []AppSettings
+	settings.SetApplyHook(func(next AppSettings) {
+		applied = append(applied, next)
+	})
+
+	if _, err := settings.Update(AppSettings{
+		WindowMode:  WindowModeGlass,
+		Autostart:   true,
+		StartHidden: true,
+	}); err == nil {
+		t.Fatal("Update should fail when the login item cannot be written")
+	}
+	if len(applied) != 1 {
+		t.Fatalf("hook called %d times, want 1 rollback notification", len(applied))
+	}
+	if applied[0].Autostart || applied[0].StartHidden {
+		t.Fatalf("hook should receive the previous settings, got %+v", applied[0])
+	}
+}

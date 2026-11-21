@@ -20,6 +20,7 @@ var Version = "0.1.0"
 const (
 	settingWindowMode      = "window.mode"
 	settingWindowBounds    = "window.bounds"
+	settingMiniBounds      = "window.miniBounds"
 	settingCloseToTray     = "app.closeToTray"
 	settingStartHidden     = "app.startHidden"
 	settingAutostart       = "app.autostart"
@@ -71,6 +72,11 @@ type SettingsService struct {
 	// to the real login items of the machine running the tests.
 	applyAutostart func(enabled, startHidden bool) error
 
+	// apply is called after a successful write so the shell can react to a
+	// preference that affects the live window (the mini player stays on top).
+	// It must not call back into the settings service, which still holds mu.
+	apply func(settings AppSettings)
+
 	// mu serialises updates so two quick toggles cannot interleave their
 	// autostart writes.
 	mu sync.Mutex
@@ -90,6 +96,14 @@ func (s *SettingsService) updateAutostart(enabled, startHidden bool) error {
 		return setAutostart(enabled, startHidden)
 	}
 	return s.applyAutostart(enabled, startHidden)
+}
+
+// SetApplyHook registers the shell callback that applies live window
+// preferences. It is wired in main once the desktop shell exists.
+func (s *SettingsService) SetApplyHook(hook func(settings AppSettings)) {
+	s.mu.Lock()
+	s.apply = hook
+	s.mu.Unlock()
 }
 
 // ServiceName makes generated bindings call this service "Settings".
@@ -121,6 +135,7 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 		return AppSettings{}, err
 	}
 	if next.Autostart == previous.Autostart && next.StartHidden == previous.StartHidden {
+		s.applyLocked(next)
 		return next, nil
 	}
 	if err := s.updateAutostart(next.Autostart, next.StartHidden); err != nil {
@@ -128,9 +143,19 @@ func (s *SettingsService) Update(next AppSettings) (AppSettings, error) {
 			return previous, fmt.Errorf("update autostart: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		_ = s.updateAutostart(previous.Autostart, previous.StartHidden)
+		s.applyLocked(previous)
 		return previous, fmt.Errorf("update autostart: %w", err)
 	}
+	s.applyLocked(next)
 	return next, nil
+}
+
+// applyLocked notifies the shell. The caller holds mu.
+func (s *SettingsService) applyLocked(settings AppSettings) {
+	if s.apply == nil {
+		return
+	}
+	s.apply(settings)
 }
 
 func (s *SettingsService) readLocked() (AppSettings, error) {
@@ -283,7 +308,35 @@ func (s *SettingsService) closeToTray() bool {
 }
 
 func (s *SettingsService) windowBounds() (WindowBounds, bool) {
-	raw, ok, err := s.store.Setting(settingWindowBounds)
+	return s.readBounds(settingWindowBounds)
+}
+
+func (s *SettingsService) saveWindowBounds(bounds WindowBounds) error {
+	return s.saveBounds(settingWindowBounds, bounds)
+}
+
+// miniBounds returns the saved mini player placement, if the user ever used
+// one. The shell falls back to the bottom-right corner of the primary display.
+func (s *SettingsService) miniBounds() (WindowBounds, bool) {
+	return s.readBounds(settingMiniBounds)
+}
+
+func (s *SettingsService) saveMiniBounds(bounds WindowBounds) error {
+	return s.saveBounds(settingMiniBounds, bounds)
+}
+
+// alwaysOnTopMini reports whether the compact player should stay above other
+// windows. It defaults to on so tray playback stays reachable.
+func (s *SettingsService) alwaysOnTopMini() bool {
+	settings, err := s.Get()
+	if err != nil {
+		return true
+	}
+	return settings.AlwaysOnTopMini
+}
+
+func (s *SettingsService) readBounds(key string) (WindowBounds, bool) {
+	raw, ok, err := s.store.Setting(key)
 	if err != nil || !ok {
 		return WindowBounds{}, false
 	}
@@ -297,7 +350,7 @@ func (s *SettingsService) windowBounds() (WindowBounds, bool) {
 	return bounds, true
 }
 
-func (s *SettingsService) saveWindowBounds(bounds WindowBounds) error {
+func (s *SettingsService) saveBounds(key string, bounds WindowBounds) error {
 	if bounds.Width <= 0 || bounds.Height <= 0 {
 		return errors.New("window bounds must have a positive size")
 	}
@@ -305,7 +358,7 @@ func (s *SettingsService) saveWindowBounds(bounds WindowBounds) error {
 	if err != nil {
 		return fmt.Errorf("encode window bounds: %w", err)
 	}
-	return s.store.SetSetting(settingWindowBounds, string(encoded))
+	return s.store.SetSetting(key, string(encoded))
 }
 
 // appPaths returns the database and artwork roots. WAVEN_DATA_DIR and

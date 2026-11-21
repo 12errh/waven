@@ -1,6 +1,6 @@
 'use client';
 
-import { Maximize2, Minus, X } from 'lucide-react';
+import { Maximize2, Minus, PictureInPicture2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { runWindowAction } from '@/lib/desktop-runtime';
 import { WINDOW_MODE_SWATCHES, WINDOW_MODES, type WindowMode } from '@/lib/window-mode';
@@ -8,9 +8,11 @@ import { WINDOW_MODE_SWATCHES, WINDOW_MODES, type WindowMode } from '@/lib/windo
 interface DesktopControlsProps {
   mode: WindowMode;
   onModeChange: (mode: WindowMode) => void;
+  /** Switches to the compact player window. */
+  onMini?: () => void;
 }
 
-export function DesktopControls({ mode, onModeChange }: DesktopControlsProps) {
+export function DesktopControls({ mode, onModeChange, onMini }: DesktopControlsProps) {
   return (
     <div className="wails-no-drag flex items-center gap-1.5">
       <div
@@ -47,6 +49,18 @@ export function DesktopControls({ mode, onModeChange }: DesktopControlsProps) {
       </div>
 
       <div aria-hidden="true" className="mx-0.5 h-4 w-px bg-white/10" />
+
+      {onMini && (
+        <button
+          type="button"
+          title="Mini player (M)"
+          aria-label="Switch to mini player"
+          onClick={onMini}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/[0.10] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <PictureInPicture2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      )}
 
       <button
         type="button"

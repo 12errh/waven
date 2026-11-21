@@ -74,6 +74,9 @@ func main() {
 	app.RegisterService(application.NewService(settingsService))
 
 	shell = desktop.New(app, settingsService, libraryService, startHidden)
+	// Live preference changes (always-on-top for the mini player) reach the
+	// window through this hook.
+	settingsService.SetApplyHook(shell.ApplySettings)
 	playerService, err := desktop.NewPlayerService(app, libraryService, shell)
 	if err != nil {
 		log.Fatal(err)
