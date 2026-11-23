@@ -1,27 +1,42 @@
+# Dependencies and build caches
 node_modules/
 .next/
 coverage/
-.DS_Store
-*.log
+dist/
 *.tsbuildinfo
+
+# Environment / secrets
 .env*
 !.env.example
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temporary local artifacts
+*.log
+*.tmp
+.tmp-review/
+pi-session-*.html
+__pycache__/
+*.pyc
 
 # Desktop build output
 bin/
 frontend/out/
 build/bin/
-dist/
 *.exe
 *.app
 *.dylib
 *.so
 *.test
-.DS_Store
 
 # Generated packaging intermediates
 build/linux/appimage/waven
 build/linux/appimage/build/
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 waven_windows_*.syso
-
