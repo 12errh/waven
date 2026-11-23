@@ -415,6 +415,25 @@ func (d *Desktop) applyNowPlayingLocked() {
 	}
 }
 
+// nudgePaint asks the page to relayout after a hidden webview is mapped again.
+// WebKitGTK can keep a stale, empty compositor surface until the next resize;
+// dispatching a resize after the map forces a fresh paint without changing the
+// window bounds (which GTK/Wayland may ignore or snap back anyway).
+func (d *Desktop) nudgePaint(window *application.WebviewWindow) {
+	if window == nil {
+		return
+	}
+	time.AfterFunc(120*time.Millisecond, func() {
+		if d.quitting.Load() {
+			return
+		}
+		window.ExecJS(`(() => {
+			window.dispatchEvent(new Event('resize'));
+			void document.body?.offsetHeight;
+		})()`)
+	})
+}
+
 // activeWindow returns the window the tray controls should act on. While the
 // compact player is active that is the mini window, not the hidden full shell.
 func (d *Desktop) activeWindow() *application.WebviewWindow {
@@ -436,6 +455,7 @@ func (d *Desktop) Show() {
 	d.window.UnMinimise()
 	d.window.Show()
 	d.window.Focus()
+	d.nudgePaint(d.window)
 }
 
 // showAfterTrayLoss reveals a window that was meant to start hidden when no
@@ -527,12 +547,14 @@ func (d *Desktop) ShowFull() {
 		d.miniWindow.Hide()
 	}
 	if d.window != nil {
-		// The full window stayed mounted and hidden, so restoring its saved
-		// bounds is enough. Applying them before the map avoids a visible jump.
-		d.applyFullBounds()
+		// The full window was never resized or moved while hidden, so do not
+		// touch its bounds here. Some webviews invalidate their surface when a
+		// hidden window is re-mapped after a resize, which showed up as a blank
+		// full player after expanding from the mini window.
 		d.window.UnMinimise()
 		d.window.Show()
 		d.window.Focus()
+		d.nudgePaint(d.window)
 	}
 	d.emitMini(false)
 }
@@ -686,6 +708,7 @@ func (d *Desktop) showMiniWindow() bool {
 	window.SetAlwaysOnTop(onTop)
 	window.Show()
 	window.Focus()
+	d.nudgePaint(window)
 	return true
 }
 

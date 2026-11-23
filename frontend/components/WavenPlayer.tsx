@@ -1576,9 +1576,16 @@ export function WavenPlayer() {
                 setDockSection('home');
                 setTopTab('Discover');
               }}
-              className="wails-no-drag font-display text-xl sm:text-[22px] font-extrabold tracking-[0.08em] text-white uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded-md"
+              aria-label="WAVEN home"
+              className="wails-no-drag flex items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
             >
-              WAVEN
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/wordmark.png"
+                alt="WAVEN"
+                draggable={false}
+                className="h-6 w-auto max-w-[150px] object-contain sm:h-7"
+              />
             </button>
             {library.preview && (
               <span

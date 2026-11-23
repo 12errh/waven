@@ -445,6 +445,22 @@ export function SettingsView({
         title="About WAVEN"
         description="Local-first playback. Your library, settings, and playback session stay on this machine."
       >
+        <div className="flex items-center gap-3 pb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/logo.png"
+            alt=""
+            draggable={false}
+            className="h-11 w-11 shrink-0 object-contain"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/wordmark.png"
+            alt="WAVEN"
+            draggable={false}
+            className="h-8 w-auto max-w-[170px] object-contain"
+          />
+        </div>
         <div className="divide-y divide-white/[0.06]">
           <InfoRow label="Version" value={info?.version ?? '…'} />
           <InfoRow label="Platform" value={platformLabel(info?.platform)} />
