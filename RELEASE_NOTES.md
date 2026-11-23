@@ -19,7 +19,7 @@ library stays in SQLite on your machine.
 | Platform | Artifact |
 |---|---|
 | Linux | `waven-linux-amd64.deb`, AppImage (best effort) |
-| Windows | per-user NSIS installer (amd64) |
+| Windows | `waven-windows-amd64.zip` (portable build; the NSIS installer is produced by CI) |
 | macOS | `waven-darwin-arm64.dmg`, `waven-darwin-amd64.dmg` |
 
 Packages are unsigned. On macOS, right-click → Open the first time; on Windows, SmartScreen
