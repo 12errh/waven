@@ -7,6 +7,10 @@ vars:
   DEV_PORT: '9245'
   VERSION: '{{.VERSION | default "0.1.0"}}'
   LDFLAGS: '-s -w -X waven/internal/desktop.Version={{.VERSION}}'
+  # Wails defaults to GTK4 on Linux. Pinning GTK3 keeps builds compatible with
+  # Ubuntu 22.04 (the CI runner) and matches the .deb dependencies. The tag is
+  # ignored on Windows and macOS.
+  BUILD_TAGS: 'production,gtk3'
 
 tasks:
   generate:bindings:
@@ -36,7 +40,7 @@ tasks:
       - task: generate:bindings
       - task: build:frontend
       - mkdir -p bin
-      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
+      - go build -tags {{.BUILD_TAGS}} -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
 
   build:dev:
     summary: Build a development binary that serves the exported frontend from disk
@@ -67,7 +71,7 @@ tasks:
       - task: build:frontend
       - task: generate:icons
       - task: generate:syso
-      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}} -H windowsgui" -o bin/waven.exe .
+      - go build -tags {{.BUILD_TAGS}} -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}} -H windowsgui" -o bin/waven.exe .
     env:
       GOOS: windows
       CGO_ENABLED: 0
@@ -92,7 +96,7 @@ tasks:
       - task: generate:bindings
       - task: build:frontend
       - task: generate:icons
-      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
+      - go build -tags {{.BUILD_TAGS}} -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
     env:
       GOOS: darwin
       CGO_ENABLED: 1
