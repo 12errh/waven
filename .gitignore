@@ -17,6 +17,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local AI studio scratch artifacts (never part of the app)
+.aistudio/
+
 # Logs and temporary local artifacts
 *.log
 *.tmp
