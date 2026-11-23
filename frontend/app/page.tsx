@@ -1,6 +1,6 @@
 import { MotionConfig } from 'motion/react';
 import { ToastProvider } from '@/components/ToastStack';
-import { WavenPlayer } from '@/components/WavenPlayer';
+import { WindowRoot } from '@/components/WindowRoot';
 
 export default function HomePage() {
   return (
@@ -8,7 +8,7 @@ export default function HomePage() {
     // transforms and opacity snap to their end state instead of animating.
     <MotionConfig reducedMotion="user">
       <ToastProvider>
-        <WavenPlayer />
+        <WindowRoot />
       </ToastProvider>
     </MotionConfig>
   );

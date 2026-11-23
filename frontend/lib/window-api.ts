@@ -4,9 +4,9 @@ import { Events } from '@wailsio/runtime';
 import * as Window from '@/bindings/waven/internal/desktop/windowservice';
 
 /**
- * The window surface the compact player needs. The Wails implementation resizes
- * the native window; the browser preview only flips the layout flag so the mini
- * player can still be reviewed with `next dev`.
+ * The window surface the compact player needs. The Wails implementation shows
+ * a dedicated compact window; the browser preview only flips the layout flag
+ * so the mini player can still be reviewed with `next dev`.
  */
 export interface WindowApi {
   /** True only for the browser preview, never for the desktop shell. */
@@ -15,6 +15,8 @@ export interface WindowApi {
   showFull(): Promise<void>;
   toggleMini(): Promise<void>;
   isMini(): Promise<boolean>;
+  /** Hides the active window to the tray (the compact window's close button). */
+  hide(): Promise<void>;
   setAlwaysOnTop(onTop: boolean): Promise<void>;
   /** Fires wherever the switch came from: tray, header button, or shortcut. */
   onMiniChange(listener: (mini: boolean) => void): () => void;
@@ -27,6 +29,7 @@ function createDesktopApi(): WindowApi {
     showFull: () => Window.ShowFull(),
     toggleMini: () => Window.ToggleMini(),
     isMini: () => Window.IsMini(),
+    hide: () => Window.Hide(),
     setAlwaysOnTop: (onTop) => Window.SetAlwaysOnTop(onTop),
     onMiniChange: (listener) =>
       Events.On('window:mini', (event) => {
@@ -37,7 +40,7 @@ function createDesktopApi(): WindowApi {
 }
 
 // The browser preview keeps the flag in memory for the life of the page. There
-// is no native window to resize, so this only exercises the compact layout.
+// is no second native window, so this only exercises the compact layout.
 const previewListeners = new Set<(mini: boolean) => void>();
 let previewMini = false;
 
@@ -60,6 +63,9 @@ function createPreviewApi(): WindowApi {
     },
     async isMini() {
       return previewMini;
+    },
+    async hide() {
+      setPreviewMini(false);
     },
     async setAlwaysOnTop() {
       // The browser has no window to pin.

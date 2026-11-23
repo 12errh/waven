@@ -5,8 +5,20 @@ version: '3'
 vars:
   APP_NAME: waven
   DEV_PORT: '9245'
+  VERSION: '{{.VERSION | default "0.1.0"}}'
+  LDFLAGS: '-s -w -X waven/internal/desktop.Version={{.VERSION}}'
 
 tasks:
+  generate:bindings:
+    summary: Regenerate the TypeScript bridge from the Go services
+    cmds:
+      - wails3 generate bindings -ts
+
+  generate:icons:
+    summary: Generate Windows and macOS icons from build/appicon.png
+    cmds:
+      - wails3 generate icons -input build/appicon.png -windowsfilename build/windows/icon.ico -macfilename build/darwin/icon.icns
+
   dev:
     summary: Run WAVEN with Next.js HMR and Go hot restart
     cmds:
@@ -20,11 +32,11 @@ tasks:
 
   build:
     summary: Build the production desktop binary
-    deps:
-      - task: build:frontend
     cmds:
+      - task: generate:bindings
+      - task: build:frontend
       - mkdir -p bin
-      - go build -tags production -trimpath -buildvcs=false -ldflags="-s -w" -o bin/waven .
+      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
 
   build:dev:
     summary: Build a development binary that serves the exported frontend from disk
@@ -38,6 +50,85 @@ tasks:
       - task: build
     cmds:
       - ./bin/waven
+
+  # ---------------------------------------------------------------------------
+  # Platform builds. CI calls these on native runners; ARCH selects the target.
+  # ---------------------------------------------------------------------------
+
+  generate:syso:
+    summary: Generate the Windows version resource from the icon, manifest, and info
+    cmds:
+      - wails3 generate syso -arch {{.ARCH | default "amd64"}} -icon build/windows/icon.ico -manifest build/windows/waven.exe.manifest -info build/windows/info.json -out waven_windows_{{.ARCH | default "amd64"}}.syso
+
+  build:windows:
+    summary: Build the Windows executable (CGO-free Wails backend)
+    cmds:
+      - task: generate:bindings
+      - task: build:frontend
+      - task: generate:icons
+      - task: generate:syso
+      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}} -H windowsgui" -o bin/waven.exe .
+    env:
+      GOOS: windows
+      CGO_ENABLED: 0
+      GOARCH: '{{.ARCH | default "amd64"}}'
+
+  create:nsis:installer:
+    summary: Run makensis from its script directory so relative OutFile paths resolve
+    dir: build/windows/nsis
+    cmds:
+      - makensis -DINFO_PRODUCTVERSION={{.VERSION}} -DARG_WAILS_AMD64_BINARY="{{.ROOT_DIR}}/bin/waven.exe" project.nsi
+
+  package:windows:
+    summary: Build the Windows NSIS per-user installer
+    cmds:
+      - task: build:windows
+      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
+      - task: create:nsis:installer
+
+  build:darwin:
+    summary: Build the macOS binary for the selected architecture
+    cmds:
+      - task: generate:bindings
+      - task: build:frontend
+      - task: generate:icons
+      - go build -tags production -trimpath -buildvcs=false -ldflags="{{.LDFLAGS}}" -o bin/waven .
+    env:
+      GOOS: darwin
+      CGO_ENABLED: 1
+      GOARCH: '{{.ARCH | default "arm64"}}'
+      CGO_CFLAGS: '-mmacosx-version-min=12.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=12.0'
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+
+  package:darwin:
+    summary: Create the macOS .app bundle and .dmg for the selected architecture
+    cmds:
+      - task: build:darwin
+      - mkdir -p bin/waven.app/Contents/MacOS bin/waven.app/Contents/Resources
+      - cp build/darwin/icon.icns bin/waven.app/Contents/Resources/
+      - cp bin/waven bin/waven.app/Contents/MacOS/
+      - sed "s/0[.]1[.]0/{{.VERSION}}/g" build/darwin/Info.plist > bin/waven.app/Contents/Info.plist
+      - codesign --force --deep --sign - bin/waven.app
+      - wails3 tool package -name waven -format dmg -out bin
+      - mv bin/waven.dmg bin/waven-darwin-{{.ARCH | default "arm64"}}.dmg
+
+  package:linux:deb:
+    summary: Build the Linux .deb package
+    cmds:
+      - task: build
+      - WAVEN_VERSION={{.VERSION}} wails3 tool package -name waven -format deb -config ./build/linux/nfpm/nfpm.yaml -out ./bin
+      - mv bin/waven.deb bin/waven-linux-{{.ARCH | default "amd64"}}.deb
+    env:
+      GOARCH: '{{.ARCH | default "amd64"}}'
+
+  package:linux:appimage:
+    summary: Build the Linux AppImage (best effort; downloads the AppImage runtime)
+    cmds:
+      - task: build
+      - mkdir -p build/linux/appimage
+      - cp bin/waven build/linux/appimage/waven
+      - wails3 generate appimage -binary build/linux/appimage/waven -icon build/appicon.png -desktopfile build/linux/waven.desktop -outputdir bin -builddir build/linux/appimage/build
 
   clean:
     summary: Remove local build output

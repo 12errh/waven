@@ -5,12 +5,20 @@ import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { Heart, Maximize2, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import { formatTimeMMSS } from '@/lib/player-logic';
 import { isNarrowMini, miniProgressRatio, miniSeekRatio } from '@/lib/mini';
-import type { Track } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CoverImage } from './CoverImage';
 
+/** The subset of a track the compact layout needs. */
+export interface MiniTrack {
+  title: string;
+  artist: string;
+  album: string;
+  coverSrc: string;
+  durationSec: number;
+}
+
 interface MiniPlayerProps {
-  track: Track | null;
+  track: MiniTrack | null;
   isPlaying: boolean;
   currentTime: number;
   duration: number;

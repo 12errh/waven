@@ -186,6 +186,25 @@ func TestFitMiniBoundsKeepsVisibleSavedPlacement(t *testing.T) {
 	}
 }
 
+func TestFitMiniBoundsIgnoresUnknownWaylandPosition(t *testing.T) {
+	screens := []*application.Screen{screen(0, 0, 1920, 1080, true)}
+	// GTK/Wayland reports every window at 0,0, so a saved corner of 0,0 must
+	// fall back to the docked bottom-right placement.
+	got, ok := fitMiniBounds(WindowBounds{X: 0, Y: 0, Width: 380, Height: 128}, true, screens)
+	if !ok {
+		t.Fatal("expected mini bounds")
+	}
+	want := application.Rect{
+		X:      1920 - miniWindowWidth - miniWindowMargin,
+		Y:      1080 - miniWindowHeight - miniWindowMargin,
+		Width:  miniWindowWidth,
+		Height: miniWindowHeight,
+	}
+	if got != want {
+		t.Fatalf("mini bounds = %+v, want %+v", got, want)
+	}
+}
+
 func TestFitMiniBoundsRecoversFromDisconnectedMonitor(t *testing.T) {
 	screens := []*application.Screen{screen(0, 0, 1920, 1080, true)}
 	got, ok := fitMiniBounds(WindowBounds{X: 4000, Y: 2000, Width: 380, Height: 128}, true, screens)

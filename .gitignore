@@ -19,3 +19,9 @@ dist/
 *.test
 .DS_Store
 
+# Generated packaging intermediates
+build/linux/appimage/waven
+build/linux/appimage/build/
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+waven_windows_*.syso
+

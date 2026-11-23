@@ -1,6 +1,6 @@
 # WAVEN Desktop — Build Plan
 
-**Status:** Phases 0–5 complete; Phase 6 next
+**Status:** Phases 0–6 complete (packaging produced by CI; platform artifacts require their runners)
 **Date:** 2026-11-21
 **Target:** Windows, macOS, Linux
 **Stack:** Wails v3 + Go + Next.js (static export)
@@ -831,13 +831,13 @@ The always-on-top preference is pushed to the live window through the settings a
 
 ### Phase 6 — Packaging and CI (2–3 days)
 
-- [ ] App icons and platform metadata.
-- [ ] Windows NSIS installer.
-- [ ] macOS `.app`/`.dmg` for arm64 and x64.
-- [ ] Linux `.deb` and AppImage.
-- [ ] GitHub Actions matrix and artifact upload.
-- [ ] Version injection.
-- [ ] Smoke-test checklist and release notes.
+- [x] App icons and platform metadata.
+- [x] Windows NSIS installer.
+- [x] macOS `.app`/`.dmg` for arm64 and x64.
+- [x] Linux `.deb` and AppImage.
+- [x] GitHub Actions matrix and artifact upload.
+- [x] Version injection.
+- [x] Smoke-test checklist and release notes.
 
 **Done when:** CI produces installable artifacts for all three platforms and the checklist
 passes on Linux plus at least one Windows and one macOS run.

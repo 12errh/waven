@@ -27,6 +27,14 @@ export function Get(): $CancellablePromise<$models.AppSettings> {
 }
 
 /**
+ * SetApplyHook registers the shell callback that applies live window
+ * preferences. It is wired in main once the desktop shell exists.
+ */
+export function SetApplyHook(hook: any): $CancellablePromise<void> {
+    return $Call.ByID(293411480, hook);
+}
+
+/**
  * Update writes all user-editable settings and applies the autostart entry.
  * If the login item cannot be written, the previous settings are restored so
  * the database never claims autostart is on when it is not.

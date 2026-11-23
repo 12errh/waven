@@ -5,6 +5,11 @@ import * as Player from '@/bindings/waven/internal/desktop/playerservice';
 import { normalizePlayerSession } from './player-logic';
 import type { PlayerSession, PlayerState } from './types';
 
+/** Commands the compact window sends to the full window, which owns playback. */
+export type PlayerCommand =
+  | { action: 'playPause' | 'next' | 'prev' | 'toggleLike' }
+  | { action: 'seek'; positionMs: number };
+
 export type TrayCommand = 'playPause' | 'next' | 'prev';
 
 /**
@@ -18,10 +23,48 @@ export interface PlayerApi {
   saveSession(session: PlayerSession): Promise<void>;
   recordPlay(trackId: number, positionMs: number): Promise<void>;
   updateState(state: PlayerState): Promise<void>;
+  /** Last state reported by the main window; used when the mini window mounts. */
+  getState(): Promise<PlayerState>;
+  /** Fires whenever the main window reports a now-playing change. */
+  onState(listener: (state: PlayerState) => void): () => void;
+  /** Transport commands from the compact window, handled by the full window. */
+  onCommand(listener: (command: PlayerCommand) => void): () => void;
+  /** Sends a transport command from the compact window to the full window. */
+  sendCommand(command: PlayerCommand): Promise<void>;
   onTrayCommand(listener: (command: TrayCommand) => void): () => void;
 }
 
 const PREVIEW_SESSION_KEY = 'waven_player_session_v1';
+
+export const EMPTY_PLAYER_STATE: PlayerState = {
+  trackId: 0,
+  title: '',
+  artist: '',
+  album: '',
+  coverSrc: '',
+  liked: false,
+  playing: false,
+  positionMs: 0,
+  durationMs: 0,
+};
+
+/** Guards against an older binding or a partial event payload. */
+export function normalizePlayerState(
+  state: Partial<PlayerState> | null | undefined
+): PlayerState {
+  if (!state) return EMPTY_PLAYER_STATE;
+  return {
+    trackId: Number(state.trackId) || 0,
+    title: String(state.title ?? ''),
+    artist: String(state.artist ?? ''),
+    album: String(state.album ?? ''),
+    coverSrc: String(state.coverSrc ?? ''),
+    liked: Boolean(state.liked),
+    playing: Boolean(state.playing),
+    positionMs: Math.max(0, Number(state.positionMs) || 0),
+    durationMs: Math.max(0, Number(state.durationMs) || 0),
+  };
+}
 
 function createDesktopApi(): PlayerApi {
   return {
@@ -31,6 +74,18 @@ function createDesktopApi(): PlayerApi {
     saveSession: (session) => Player.SaveSession(session),
     recordPlay: (trackId, positionMs) => Player.RecordPlay(trackId, positionMs),
     updateState: (state) => Player.UpdateState(state),
+    getState: async () => normalizePlayerState((await Player.GetState()) as Partial<PlayerState>),
+    onState: (listener) =>
+      Events.On('player:state', (event) => {
+        listener(normalizePlayerState(event.data as Partial<PlayerState> | null));
+      }),
+    onCommand: (listener) =>
+      Events.On('player:command', (event) => {
+        listener(event.data as PlayerCommand);
+      }),
+    sendCommand: async (command) => {
+      await Events.Emit('player:command', command);
+    },
     onTrayCommand: (listener) => {
       const offPlayPause = Events.On('tray:playPause', () => listener('playPause'));
       const offNext = Events.On('tray:next', () => listener('next'));
@@ -70,7 +125,19 @@ function createPreviewApi(): PlayerApi {
       // Preview history is synthetic; there is no database to record into.
     },
     async updateState(): Promise<void> {
-      // The browser has no tray.
+      // The browser has no tray or second window.
+    },
+    async getState(): Promise<PlayerState> {
+      return EMPTY_PLAYER_STATE;
+    },
+    onState(): () => void {
+      return () => {};
+    },
+    onCommand(): () => void {
+      return () => {};
+    },
+    async sendCommand(): Promise<void> {
+      // In the browser preview the mini layout shares this page's engine.
     },
     onTrayCommand(): () => void {
       return () => {};

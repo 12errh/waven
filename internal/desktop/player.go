@@ -28,12 +28,15 @@ type PlayerSession struct {
 	UpdatedAt    int64   `json:"updatedAt"`
 }
 
-// PlayerState is the live now-playing snapshot used for tray labels. It is not
-// persisted; the resumable state is PlayerSession.
+// PlayerState is the live now-playing snapshot used for tray labels and the
+// compact window. It is not persisted; the resumable state is PlayerSession.
 type PlayerState struct {
 	TrackID    int64  `json:"trackId"`
 	Title      string `json:"title"`
 	Artist     string `json:"artist"`
+	Album      string `json:"album"`
+	CoverSrc   string `json:"coverSrc"`
+	Liked      bool   `json:"liked"`
 	Playing    bool   `json:"playing"`
 	PositionMs int64  `json:"positionMs"`
 	DurationMs int64  `json:"durationMs"`
@@ -142,15 +145,20 @@ func (s *PlayerService) RecordPlay(trackID, positionMs int64) error {
 	return s.library.store.RecordPlay(trackID, time.Now().UnixMilli(), positionMs)
 }
 
-// UpdateState mirrors the live player state into the tray. The frontend calls
-// this on track and play/pause changes, and periodically while playing.
+// UpdateState mirrors the live player state into the tray and the compact
+// window. The frontend calls this on track and play/pause changes, and
+// periodically while playing.
 func (s *PlayerService) UpdateState(state PlayerState) error {
 	s.mu.Lock()
 	s.state = state
 	shell := s.shell
+	app := s.app
 	s.mu.Unlock()
 	if shell != nil {
 		shell.SetNowPlaying(state)
+	}
+	if app != nil {
+		app.Event.Emit("player:state", state)
 	}
 	return nil
 }

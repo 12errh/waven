@@ -522,13 +522,16 @@ export class PlayerSession {
 }
 
 /**
- * PlayerState is the live now-playing snapshot used for tray labels. It is not
- * persisted; the resumable state is PlayerSession.
+ * PlayerState is the live now-playing snapshot used for tray labels and the
+ * compact window. It is not persisted; the resumable state is PlayerSession.
  */
 export class PlayerState {
     "trackId": number;
     "title": string;
     "artist": string;
+    "album": string;
+    "coverSrc": string;
+    "liked": boolean;
     "playing": boolean;
     "positionMs": number;
     "durationMs": number;
@@ -543,6 +546,15 @@ export class PlayerState {
         }
         if (!("artist" in $$source)) {
             this["artist"] = "";
+        }
+        if (!("album" in $$source)) {
+            this["album"] = "";
+        }
+        if (!("coverSrc" in $$source)) {
+            this["coverSrc"] = "";
+        }
+        if (!("liked" in $$source)) {
+            this["liked"] = false;
         }
         if (!("playing" in $$source)) {
             this["playing"] = false;

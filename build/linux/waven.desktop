@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=WAVEN
+GenericName=Music Player
+Comment=A spatial music player for your local library
+Exec=waven
+TryExec=waven
+Icon=waven
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Audio;Player;
+Keywords=music;player;library;offline;

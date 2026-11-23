@@ -29,6 +29,8 @@ const (
 type Desktop struct {
 	app           *application.App
 	window        *application.WebviewWindow
+	miniWindow    *application.WebviewWindow
+	miniLock      sync.Mutex
 	tray          *application.SystemTray
 	trayLock      sync.Mutex
 	trayTrack     *application.MenuItem
@@ -46,9 +48,10 @@ type Desktop struct {
 	library     *LibraryService
 	startHidden bool
 
-	boundsLock   sync.Mutex
-	normalBounds application.Rect
-	boundsTimer  *time.Timer
+	boundsLock      sync.Mutex
+	normalBounds    application.Rect
+	boundsTimer     *time.Timer
+	miniBoundsTimer *time.Timer
 }
 
 // New wires the desktop shell to the persisted settings. startHidden is true
@@ -64,6 +67,13 @@ func (d *Desktop) Start() {
 	}
 	d.createWindow()
 	d.debugf("created window hidden=%v visible=%v", d.startHidden, d.window.IsVisible())
+
+	// The compact player is a separate window created at its final size. GTK
+	// ignores resize requests for a mapped resizable window, so the only
+	// reliable way to show a true 380x128 window is to create one that size and
+	// map it once. Preloading it hidden keeps the first toggle instant; the
+	// playback engine and the full shell stay alive in the main window.
+	d.ensureMiniWindow()
 
 	// The tray icon is only visible when the desktop provides a
 	// StatusNotifierItem host. Without one, closing the window must quit
@@ -405,8 +415,21 @@ func (d *Desktop) applyNowPlayingLocked() {
 	}
 }
 
-// Show restores and focuses the main window.
+// activeWindow returns the window the tray controls should act on. While the
+// compact player is active that is the mini window, not the hidden full shell.
+func (d *Desktop) activeWindow() *application.WebviewWindow {
+	if d.mini.Load() && d.miniWindow != nil {
+		return d.miniWindow
+	}
+	return d.window
+}
+
+// Show restores and focuses the window the user last used.
 func (d *Desktop) Show() {
+	if d.mini.Load() {
+		d.showMiniWindow()
+		return
+	}
 	if d.window == nil {
 		return
 	}
@@ -430,9 +453,16 @@ func (d *Desktop) showAfterTrayLoss() {
 	d.debugf("shown without a tray: size=%dx%d maximised=%v", width, height, d.window.IsMaximised())
 }
 
-// Hide sends the window to the tray. Placement is saved first so closing right
-// after a drag never loses the last position to a pending debounce.
+// Hide sends the active window to the tray. Placement is saved first so closing
+// right after a drag never loses the last position to a pending debounce.
 func (d *Desktop) Hide() {
+	if d.mini.Load() {
+		d.saveMiniBoundsNow()
+		if d.miniWindow != nil {
+			d.miniWindow.Hide()
+		}
+		return
+	}
 	if d.window == nil {
 		return
 	}
@@ -445,135 +475,236 @@ func (d *Desktop) Hide() {
 // GDK_TOPLEVEL_STATE_MINIMIZED, so IsMinimised alone would hide an already
 // minimised window when the tray icon is clicked.
 func (d *Desktop) Toggle() {
-	if d.window == nil {
+	window := d.activeWindow()
+	if window == nil {
 		return
 	}
-	if d.window.IsVisible() && d.window.IsFocused() {
+	if window.IsVisible() && window.IsFocused() {
 		d.Hide()
 		return
 	}
 	d.Show()
 }
 
-// IsMini reports whether the window is currently the compact player.
+// IsMini reports whether the compact player is the active window.
 func (d *Desktop) IsMini() bool {
 	return d.mini.Load()
 }
 
-// ShowMini switches to the compact player. It is safe to call repeatedly: the
-// first call resizes, and later calls simply bring the window forward.
+// ShowMini switches to the dedicated compact window. It is safe to call
+// repeatedly: later calls simply bring the mini window forward.
 func (d *Desktop) ShowMini() {
-	d.setMini(true)
+	if d.window == nil {
+		return
+	}
+	if d.mini.Load() {
+		d.showMiniWindow()
+		return
+	}
+
+	// Save the full placement before hiding the main window. The playback
+	// engine keeps running there while the mini window is on screen.
+	d.saveBoundsNow()
+	d.mini.Store(true)
+	d.window.Hide()
+
+	if !d.showMiniWindow() {
+		d.emitMini(false)
+		return
+	}
+	d.emitMini(true)
 }
 
 // ShowFull expands the mini player back to the saved full-window placement.
 func (d *Desktop) ShowFull() {
-	d.setMini(false)
+	if !d.mini.Load() {
+		d.Show()
+		return
+	}
+	d.saveMiniBoundsNow()
+	d.mini.Store(false)
+	if d.miniWindow != nil {
+		d.miniWindow.Hide()
+	}
+	if d.window != nil {
+		// The full window stayed mounted and hidden, so restoring its saved
+		// bounds is enough. Applying them before the map avoids a visible jump.
+		d.applyFullBounds()
+		d.window.UnMinimise()
+		d.window.Show()
+		d.window.Focus()
+	}
+	d.emitMini(false)
 }
 
 // ToggleMini switches between the compact player and the full window.
 func (d *Desktop) ToggleMini() {
-	d.setMini(!d.mini.Load())
-}
-
-// SetAlwaysOnTop pins or unpins the window. The settings screen calls this so a
-// preference change reaches the live mini player without a restart.
-func (d *Desktop) SetAlwaysOnTop(onTop bool) {
-	if d.window == nil {
+	if d.mini.Load() {
+		d.ShowFull()
 		return
 	}
-	d.window.SetAlwaysOnTop(onTop)
+	d.ShowMini()
+}
+
+// SetAlwaysOnTop pins or unpins the active window. The settings screen calls
+// this so a preference change reaches the live mini player without a restart.
+func (d *Desktop) SetAlwaysOnTop(onTop bool) {
+	if d.mini.Load() {
+		if d.miniWindow != nil {
+			d.miniWindow.SetAlwaysOnTop(onTop)
+		}
+		return
+	}
+	if d.window != nil {
+		d.window.SetAlwaysOnTop(onTop)
+	}
 }
 
 // ApplySettings reacts to a preference write. Only the always-on-top choice
 // affects a live window; every other setting is read when it is needed.
 func (d *Desktop) ApplySettings(settings AppSettings) {
-	if d.window == nil || !d.mini.Load() {
+	if !d.mini.Load() || d.miniWindow == nil {
 		return
 	}
-	d.window.SetAlwaysOnTop(settings.AlwaysOnTopMini)
+	d.miniWindow.SetAlwaysOnTop(settings.AlwaysOnTopMini)
 }
 
-func (d *Desktop) setMini(mini bool) {
-	if d.window == nil {
-		return
+// ensureMiniWindow creates the compact window once. The caller must not hold
+// miniLock.
+func (d *Desktop) ensureMiniWindow() *application.WebviewWindow {
+	d.miniLock.Lock()
+	defer d.miniLock.Unlock()
+	if d.miniWindow != nil {
+		return d.miniWindow
 	}
-	if d.mini.Load() == mini {
-		d.Show()
-		return
-	}
-	if mini {
-		d.enterMini()
-		return
-	}
-	d.exitMini()
+	d.miniWindow = d.createMiniWindow()
+	return d.miniWindow
 }
 
-// enterMini shrinks the window to the compact player. The full placement is
-// saved first so expanding restores exactly where the user left it.
-func (d *Desktop) enterMini() {
-	d.saveBoundsNow()
+// createMiniWindow builds the compact shell at its final size. Creating the
+// window at 380x128 is deliberate: Wails/GTK cannot reliably resize a mapped
+// resizable window, so the mini player must never start full size.
+func (d *Desktop) createMiniWindow() *application.WebviewWindow {
+	backgroundType, backgroundColour, macBackdrop, windowsBackdrop, translucent := nativeWindowAppearance()
 
-	saved, hasSaved := WindowBounds{}, false
-	if d.settings != nil {
-		saved, hasSaved = d.settings.miniBounds()
+	window := d.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:             "mini",
+		Title:            "WAVEN Mini",
+		URL:              "/?window=mini",
+		Width:            miniWindowWidth,
+		Height:           miniWindowHeight,
+		MinWidth:         miniWindowMinWidth,
+		MinHeight:        miniWindowMinHeight,
+		MaxWidth:         miniWindowMaxWidth,
+		MaxHeight:        miniWindowMaxHeight,
+		// GTK/Wayland resizes a mapped, resizable window to the webview's
+		// natural (full-page) size, which is why the compact layout used to
+		// fill a huge frame. Keeping the mini window fixed at its creation
+		// size makes GTK honour the 380x128 default size at map time.
+		DisableResize:    true,
+		Frameless:        true,
+		Hidden:           true,
+		BackgroundType:   backgroundType,
+		BackgroundColour: backgroundColour,
+		InitialPosition:  application.WindowCentered,
+		Mac: application.MacWindow{
+			Backdrop:     macBackdrop,
+			CornerType:   application.MacWindowCornerTypeRounded,
+			CornerRadius: 18,
+		},
+		Windows: application.WindowsWindow{
+			BackdropType: windowsBackdrop,
+			Theme:        application.Dark,
+		},
+		Linux: application.LinuxWindow{
+			WindowIsTranslucent: translucent,
+			WebviewGpuPolicy:    application.WebviewGpuPolicyAlways,
+			Icon:                appIcon,
+		},
+	})
+
+	// Closing the compact window means "hide to tray", exactly like the full
+	// window. Without a tray host the process quits so it can never strand.
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if d.quitting.Load() {
+			return
+		}
+		if !d.trayAvailable.Load() {
+			log.Printf("mini window closing: no system tray host; quitting")
+			event.Cancel()
+			go d.Quit()
+			return
+		}
+		if d.settings != nil && !d.settings.closeToTray() {
+			log.Printf("mini window closing: close-to-tray is off; quitting")
+			event.Cancel()
+			go d.Quit()
+			return
+		}
+		d.debugf("mini window closing: hiding to tray")
+		d.Hide()
+		event.Cancel()
+	})
+
+	window.RegisterHook(events.Common.WindowDidMove, func(*application.WindowEvent) {
+		d.scheduleSaveMiniBounds(450 * time.Millisecond)
+	})
+	window.RegisterHook(events.Common.WindowDidResize, func(*application.WindowEvent) {
+		d.scheduleSaveMiniBounds(450 * time.Millisecond)
+	})
+	d.registerDiagnosticHooks(window)
+
+	d.debugf("created mini window hidden=%v", window.IsVisible())
+	return window
+}
+
+// showMiniWindow brings the compact window forward, applying the saved
+// placement while it is still hidden. Resizing a hidden window is reliable;
+// resizing a mapped one is not on GTK/Wayland.
+func (d *Desktop) showMiniWindow() bool {
+	window := d.ensureMiniWindow()
+	if window == nil {
+		d.mini.Store(false)
+		if d.window != nil {
+			d.window.Show()
+			d.window.Focus()
+		}
+		return false
 	}
 
-	var rect application.Rect
-	ok := false
-	if d.app != nil {
-		rect, ok = fitMiniBounds(saved, hasSaved, d.app.Screen.GetAll())
+	if !window.IsVisible() {
+		if rect, ok := d.miniWindowRect(); ok {
+			window.SetBounds(rect)
+			d.debugf("mini: placed at %dx%d, %d,%d", rect.Width, rect.Height, rect.X, rect.Y)
+		}
 	}
-	if !ok {
-		// No display information: keep the current top-left corner and shrink
-		// in place rather than refusing the command.
-		x, y := d.window.Position()
-		rect = application.Rect{X: x, Y: y, Width: miniWindowWidth, Height: miniWindowHeight}
-		d.debugf("mini: no display information; shrinking in place")
-	}
-
-	d.mini.Store(true)
-	// A maximised window ignores SetBounds, and mini mode is never maximised.
-	if d.window.IsMaximised() {
-		d.maximized.Store(false)
-		d.window.UnMaximise()
-	}
-	// The full window has a 960x640 minimum, which would clamp the compact
-	// size away. Lower it for the duration of mini mode.
-	d.window.SetMinSize(miniWindowMinWidth, miniWindowMinHeight)
-	d.window.SetBounds(rect)
 
 	onTop := true
 	if d.settings != nil {
 		onTop = d.settings.alwaysOnTopMini()
 	}
-	d.window.SetAlwaysOnTop(onTop)
-	d.debugf("mini: %dx%d at %d,%d onTop=%v", rect.Width, rect.Height, rect.X, rect.Y, onTop)
-
-	d.window.Show()
-	d.window.Focus()
-	d.emitMini(true)
+	window.SetAlwaysOnTop(onTop)
+	window.Show()
+	window.Focus()
+	return true
 }
 
-// exitMini restores the full window and clears the mini-only window flags.
-func (d *Desktop) exitMini() {
-	d.saveMiniBoundsNow()
-	d.mini.Store(false)
-	d.window.SetAlwaysOnTop(false)
-	d.window.SetMinSize(minimumWindowWidth, minimumWindowHeight)
-	if !d.applyFullBounds() {
-		d.fitToScreen()
+// miniWindowRect resolves the saved compact placement against the displays
+// that are currently connected.
+func (d *Desktop) miniWindowRect() (application.Rect, bool) {
+	if d.app == nil {
+		return application.Rect{}, false
 	}
-	fullWidth, fullHeight := d.window.Size()
-	d.debugf("mini: expanded to %dx%d", fullWidth, fullHeight)
-	d.window.Show()
-	d.window.Focus()
-	d.emitMini(false)
+	saved, hasSaved := WindowBounds{}, false
+	if d.settings != nil {
+		saved, hasSaved = d.settings.miniBounds()
+	}
+	return fitMiniBounds(saved, hasSaved, d.app.Screen.GetAll())
 }
 
-// MiniState is the payload of the window:mini event. The frontend renders the
-// compact layout when Mini is true, wherever the switch came from (tray, the
-// header button, or a keyboard shortcut).
+// MiniState is the payload of the window:mini event. It lets the browser
+// preview swap to the compact layout; the desktop shell uses two windows and
+// the full window stays mounted behind the mini player.
 type MiniState struct {
 	Mini bool `json:"mini"`
 }
@@ -604,6 +735,7 @@ func (d *Desktop) applyMiniLabelLocked() {
 // Quit exits the process, including any playback running in the background.
 func (d *Desktop) Quit() {
 	d.saveBoundsNow()
+	d.saveMiniBoundsNow()
 	d.quitting.Store(true)
 	d.app.Quit()
 }
@@ -742,6 +874,15 @@ func (d *Desktop) scheduleSaveBounds(delay time.Duration) {
 	d.boundsLock.Unlock()
 }
 
+func (d *Desktop) scheduleSaveMiniBounds(delay time.Duration) {
+	d.boundsLock.Lock()
+	if d.miniBoundsTimer != nil {
+		d.miniBoundsTimer.Stop()
+	}
+	d.miniBoundsTimer = time.AfterFunc(delay, d.saveMiniBoundsNow)
+	d.boundsLock.Unlock()
+}
+
 // saveBoundsNow persists the normal placement and the maximised flag. The flag
 // is tracked from maximise/unmaximise events instead of IsMaximised(): some
 // compositors report a window that fills the work area as maximised even
@@ -749,13 +890,6 @@ func (d *Desktop) scheduleSaveBounds(delay time.Duration) {
 // maximised frame, so the last normal bounds are kept instead.
 func (d *Desktop) saveBoundsNow() {
 	if d.window == nil || d.settings == nil {
-		return
-	}
-
-	// While the compact player is active its placement belongs in
-	// window.miniBounds. The full-window row keeps the placement to return to.
-	if d.mini.Load() {
-		d.saveMiniBoundsNow()
 		return
 	}
 
@@ -789,10 +923,10 @@ func (d *Desktop) saveBoundsNow() {
 // saveMiniBoundsNow persists the compact placement and size so the user's
 // corner survives a relaunch. Mini bounds are never maximised.
 func (d *Desktop) saveMiniBoundsNow() {
-	if d.window == nil || d.settings == nil {
+	if d.miniWindow == nil || d.settings == nil {
 		return
 	}
-	bounds := d.window.Bounds()
+	bounds := d.miniWindow.Bounds()
 	if bounds.Width <= 0 || bounds.Height <= 0 {
 		return
 	}
@@ -940,31 +1074,52 @@ func (d *Desktop) smokeTest() {
 	d.window.ExecJS(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to Discover'))?.click()`)
 	time.Sleep(800 * time.Millisecond)
 
-	// Mini player: the window must shrink, keep the page alive, and report the
-	// compact layout so the frontend swaps its shell. Expanding must restore the
-	// full-window placement and clear always-on-top.
+	// Mini player: a dedicated compact window must map at 380x128 while the
+	// full window stays mounted and hidden so playback continues. Expanding
+	// must hide the mini window and restore the full-window placement.
 	log.Printf("smoke: entering the mini player")
 	d.ShowMini()
 	time.Sleep(900 * time.Millisecond)
-	miniWidth, miniHeight := d.window.Size()
+	miniWidth, miniHeight := 0, 0
+	miniVisible := false
+	if d.miniWindow != nil {
+		miniWidth, miniHeight = d.miniWindow.Size()
+		miniVisible = d.miniWindow.IsVisible()
+	}
 	miniSaved, _ := d.settings.miniBounds()
-	log.Printf("smoke: mini size=%dx%d savedMini=%dx%d onTop=%v",
-		miniWidth, miniHeight, miniSaved.Width, miniSaved.Height, d.IsMini())
-	d.window.ExecJS(`(() => {
-		const root = document.querySelector('[data-window-layout]');
-		const title = document.querySelector('[data-mini-title]')?.textContent ?? 'missing';
-		fetch('/waven-probe?layout=' + encodeURIComponent(root?.getAttribute('data-window-layout') ?? 'missing') +
-			'&miniTitle=' + encodeURIComponent(title));
-	})()`)
+	log.Printf("smoke: mini size=%dx%d visible=%v savedMini=%dx%d fullVisible=%v mini=%v",
+		miniWidth, miniHeight, miniVisible, miniSaved.Width, miniSaved.Height, d.window.IsVisible(), d.IsMini())
+	if d.miniWindow != nil {
+		d.miniWindow.ExecJS(`(() => {
+			const root = document.querySelector('[data-window-layout]');
+			const title = document.querySelector('[data-mini-title]')?.textContent ?? 'missing';
+			fetch('/waven-probe?layout=' + encodeURIComponent(root?.getAttribute('data-window-layout') ?? 'missing') +
+				'&miniTitle=' + encodeURIComponent(title));
+		})()`)
+	}
 	time.Sleep(500 * time.Millisecond)
 	probeAudio("mini")
 
+	// The compact window has no audio element of its own. Its buttons must
+	// reach the hidden full window, which owns playback.
+	if audioSmoke && d.miniWindow != nil {
+		log.Printf("smoke: toggling playback from the mini window")
+		d.miniWindow.ExecJS(`document.querySelector('[aria-label="Pause playback"]')?.click()`)
+		time.Sleep(900 * time.Millisecond)
+		probeAudio("pausedFromMini")
+		d.miniWindow.ExecJS(`document.querySelector('[aria-label="Play"]')?.click()`)
+		time.Sleep(900 * time.Millisecond)
+		probeAudio("resumedFromMini")
+	}
+
 	log.Printf("smoke: expanding from the mini player with Esc")
-	d.window.ExecJS(`document.querySelector('[data-window-layout]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+	if d.miniWindow != nil {
+		d.miniWindow.ExecJS(`document.querySelector('[data-window-layout]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+	}
 	time.Sleep(900 * time.Millisecond)
 	fullWidth, fullHeight := d.window.Size()
-	log.Printf("smoke: expanded size=%dx%d mini=%v visible=%v",
-		fullWidth, fullHeight, d.IsMini(), d.window.IsVisible())
+	log.Printf("smoke: expanded size=%dx%d mini=%v visible=%v miniVisible=%v",
+		fullWidth, fullHeight, d.IsMini(), d.window.IsVisible(), d.miniWindow != nil && d.miniWindow.IsVisible())
 
 	log.Printf("smoke: clicking the minimise control")
 	d.window.ExecJS(`document.querySelector('[aria-label="Minimise window"]')?.click()`)

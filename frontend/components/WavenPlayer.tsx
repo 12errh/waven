@@ -16,7 +16,7 @@ import type {
 import { motion } from 'motion/react';
 import { AlertCircle, AlertTriangle, FolderPlus, LayoutGrid, Loader2, X } from 'lucide-react';
 import { PlayerEngine, type PlaybackError } from '@/lib/player-engine';
-import { getPlayerApi } from '@/lib/player-api';
+import { getPlayerApi, type PlayerCommand } from '@/lib/player-api';
 import { loadDesktopRuntime, runWindowAction } from '@/lib/desktop-runtime';
 import {
   buildShuffleOrder,
@@ -296,6 +296,8 @@ export function WavenPlayer() {
   const handlePrevRef = useRef<() => void>(() => {});
   const handleTogglePlayRef = useRef<() => void>(() => {});
   const reportTrayStateRef = useRef<() => void>(() => {});
+  const playerCommandRef = useRef<(command: PlayerCommand) => void>(() => {});
+  const lastStateReportRef = useRef(0);
   const libraryRef = useRef(library);
 
   const {
@@ -428,10 +430,18 @@ export function WavenPlayer() {
         // from the tray still stores a current position.
         if (!isPlayingRef.current) {
           lastCheckpointPositionRef.current = time;
-        } else if (Math.abs(time - lastCheckpointPositionRef.current) >= 5) {
-          lastCheckpointPositionRef.current = time;
-          persistSession();
-          reportTrayStateRef.current();
+        } else {
+          if (Math.abs(time - lastCheckpointPositionRef.current) >= 5) {
+            lastCheckpointPositionRef.current = time;
+            persistSession();
+          }
+          // The compact window walks the clock locally between reports, but a
+          // one-second cadence keeps it honest after a seek or a compositor
+          // throttles a hidden window's progress events.
+          if (performance.now() - lastStateReportRef.current >= 1000) {
+            lastStateReportRef.current = performance.now();
+            reportTrayStateRef.current();
+          }
         }
       },
       onEnded: () => {
@@ -520,9 +530,10 @@ export function WavenPlayer() {
     };
   }, []);
 
-  // The compact player is a native window mode, not a route. Go emits
-  // `window:mini` for every switch (tray, header button, shortcut) so the shell
-  // and the window can never disagree about which layout is on screen.
+  // The compact player is a separate native window. On the desktop the full
+  // window stays mounted while it is hidden so the audio element, queue, and
+  // every playback ref survive the switch. Only the browser preview swaps its
+  // layout flag, because there is no second window to show.
   useEffect(() => {
     let closed = false;
     let off: (() => void) | undefined;
@@ -531,6 +542,7 @@ export function WavenPlayer() {
         const api = await getWindowApi();
         if (closed) return;
         windowApiRef.current = api;
+        if (!api.preview) return;
         const current = await api.isMini();
         if (closed) return;
         miniRef.current = current;
@@ -556,7 +568,12 @@ export function WavenPlayer() {
   const toggleMini = useCallback(() => {
     const api = windowApiRef.current;
     if (!api) return;
-    void (miniRef.current ? api.showFull() : api.showMini());
+    if (api.preview) {
+      void (miniRef.current ? api.showFull() : api.showMini());
+      return;
+    }
+    // The Go shell owns the two native windows and their saved placement.
+    void api.toggleMini();
   }, []);
 
   // Applying the always-on-top preference needs the live window, so the shell
@@ -573,6 +590,9 @@ export function WavenPlayer() {
       : resolveTrack(currentTrackId) ??
         library.recent.find((track) => track.id === currentTrackId) ??
         null;
+
+  const isCurrentLiked =
+    currentTrack !== null && (library.likes.has(currentTrack.id) || currentTrack.liked);
 
   // Resolve the restored current track even when it is outside the recent
   // page. The shared index re-renders this component when the lookup lands.
@@ -1085,8 +1105,39 @@ export function WavenPlayer() {
     };
   }, []);
 
-  // Mirror the now-playing track into the tray on changes and every five
-  // seconds while playing so diagnostics and the menu stay current.
+  // Commands from the compact window. Playback lives in this window, so the
+  // mini window only sends intents and mirrors the state reported below.
+  useEffect(() => {
+    playerCommandRef.current = (command) => {
+      if (command.action === 'playPause') {
+        handleTogglePlayRef.current();
+      } else if (command.action === 'next') {
+        handleNextRef.current(false);
+      } else if (command.action === 'prev') {
+        handlePrevRef.current();
+      } else if (command.action === 'seek') {
+        handleSeek(command.positionMs / 1000);
+      } else if (currentTrackIdRef.current !== null) {
+        handleToggleLike(currentTrackIdRef.current);
+      }
+    };
+  }, [handleSeek, handleToggleLike]);
+
+  useEffect(() => {
+    let closed = false;
+    let off: (() => void) | undefined;
+    void getPlayerApi().then((api) => {
+      if (closed) return;
+      off = api.onCommand((command) => playerCommandRef.current(command));
+    });
+    return () => {
+      closed = true;
+      off?.();
+    };
+  }, []);
+
+  // Mirror the now-playing track into the tray on changes and every second
+  // while playing, which also keeps the compact window in sync.
   const reportTrayState = useCallback(() => {
     const api = playerApiRef.current;
     if (!api) return;
@@ -1097,6 +1148,9 @@ export function WavenPlayer() {
           trackId: 0,
           title: '',
           artist: '',
+          album: '',
+          coverSrc: '',
+          liked: false,
           playing: false,
           positionMs: 0,
           durationMs: 0,
@@ -1111,6 +1165,9 @@ export function WavenPlayer() {
         trackId: id,
         title: track.title,
         artist: track.artist,
+        album: track.album,
+        coverSrc: track.coverSrc,
+        liked: libraryRef.current.likes.has(id) || track.liked,
         playing: isPlayingRef.current,
         positionMs: Math.max(0, Math.round(currentTimeRef.current * 1000)),
         durationMs: Math.max(
@@ -1134,8 +1191,9 @@ export function WavenPlayer() {
     if (!sessionLoaded) return;
     reportTrayState();
     // currentTrack is resolved asynchronously for restored tracks; reporting
-    // again when it lands avoids a stale "Nothing playing" tray label.
-  }, [sessionLoaded, currentTrackId, isPlaying, currentTrack, reportTrayState]);
+    // again when it lands avoids a stale "Nothing playing" tray label. Likes
+    // are included so the compact window's heart follows a toggle.
+  }, [sessionLoaded, currentTrackId, isPlaying, currentTrack, isCurrentLiked, reportTrayState]);
 
   // Surface scan completion as a transient toast.
   const lastScan = library.scan.last;
@@ -1336,9 +1394,6 @@ export function WavenPlayer() {
 
   const featuredTracks = useMemo(() => library.recent.slice(0, 3), [library.recent]);
 
-  const isCurrentLiked =
-    currentTrack !== null && (library.likes.has(currentTrack.id) || currentTrack.liked);
-
   const showDiscoverEmpty = library.ready && library.recent.length === 0;
   const handleSelectSection = useCallback((section: DockSection) => {
     setDockSection(section);
@@ -1412,8 +1467,9 @@ export function WavenPlayer() {
     </div>
   );
 
-  // Compact window. The audio engine and every playback ref stay mounted, so
-  // expanding restores the exact position and queue.
+  // Browser-preview compact layout. On the desktop the compact window is a
+  // separate native window and this branch is never reached; the engine and
+  // every playback ref stay mounted in the hidden full window.
   if (mini) {
     return (
       <MiniPlayer

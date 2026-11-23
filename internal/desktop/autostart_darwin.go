@@ -47,7 +47,7 @@ func autostartPath() (string, error) {
 		}
 		dir = filepath.Join(home, "Library", "LaunchAgents")
 	}
-	return filepath.Join(dir, "app.waven.desktop.plist"), nil
+	return filepath.Join(dir, "com.waven.player.plist"), nil
 }
 
 func launchAgent(executable string, startHidden bool) string {
@@ -64,7 +64,7 @@ func launchAgent(executable string, startHidden bool) string {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>app.waven.desktop</string>
+    <string>com.waven.player</string>
     <key>ProgramArguments</key>
     <array>
 ` + arguments.String() + `    </array>

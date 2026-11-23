@@ -53,8 +53,9 @@ export function SaveSession(session: $models.PlayerSession): $CancellablePromise
 }
 
 /**
- * UpdateState mirrors the live player state into the tray. The frontend calls
- * this on track and play/pause changes, and periodically while playing.
+ * UpdateState mirrors the live player state into the tray and the compact
+ * window. The frontend calls this on track and play/pause changes, and
+ * periodically while playing.
  */
 export function UpdateState(state: $models.PlayerState): $CancellablePromise<void> {
     return $Call.ByID(1184419551, state);

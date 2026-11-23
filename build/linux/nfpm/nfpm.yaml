@@ -1,0 +1,38 @@
+# nfpm configuration for the WAVEN .deb package.
+# WAVEN_VERSION and GOARCH are supplied by the packaging task / CI.
+name: waven
+arch: ${GOARCH}
+platform: linux
+version: ${WAVEN_VERSION}
+section: sound
+priority: optional
+maintainer: WAVEN <maintainer@waven.local>
+description: A spatial, local-first music player for your own library.
+vendor: WAVEN
+homepage: https://github.com/12errh/waven
+license: MIT
+release: "1"
+
+contents:
+  - src: ./bin/waven
+    dst: /usr/bin/waven
+  - src: ./build/appicon.png
+    dst: /usr/share/icons/hicolor/512x512/apps/waven.png
+  - src: ./build/linux/waven.desktop
+    dst: /usr/share/applications/waven.desktop
+
+# Ubuntu 22.04 / Debian 12 use GTK3 + WebKitGTK 4.1. Newer distributions
+# resolve the GTK4/WebKitGTK 6 stack through recommends below.
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+  - libgstreamer1.0-0
+  - gstreamer1.0-plugins-base
+  - gstreamer1.0-plugins-good
+  - gstreamer1.0-plugins-bad
+  - gstreamer1.0-plugins-ugly
+  - libayatana-appindicator3-1
+
+recommends:
+  - libgtk-4-1
+  - libwebkitgtk-6.0-4

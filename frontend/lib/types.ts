@@ -25,11 +25,14 @@ export interface PlayerSession {
   updatedAt: number;
 }
 
-/** Live now-playing snapshot mirrored to the Go tray. Not persisted. */
+/** Live now-playing snapshot mirrored to the Go tray and compact window. */
 export interface PlayerState {
   trackId: number;
   title: string;
   artist: string;
+  album: string;
+  coverSrc: string;
+  liked: boolean;
   playing: boolean;
   positionMs: number;
   durationMs: number;

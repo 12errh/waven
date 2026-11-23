@@ -133,7 +133,10 @@ func fitMiniBounds(saved WindowBounds, hasSaved bool, screens []*application.Scr
 		width = clampInt(saved.Width, miniWindowMinWidth, miniWindowMaxWidth)
 		height = clampInt(saved.Height, miniWindowMinHeight, miniWindowMaxHeight)
 		savedRect := application.Rect{X: saved.X, Y: saved.Y, Width: width, Height: height}
-		if fullyVisibleOn(savedRect, screens) {
+		// GTK/Wayland cannot report a window's position and returns 0,0. Treat
+		// that as "unknown" rather than docking the player in the top-left
+		// corner on the next launch.
+		if saved.X > 0 && saved.Y > 0 && fullyVisibleOn(savedRect, screens) {
 			return savedRect, true
 		}
 	}

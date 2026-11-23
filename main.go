@@ -42,10 +42,10 @@ func main() {
 		Linux: application.LinuxOptions{
 			DisableQuitOnLastWindowClosed: true,
 			ProgramName:                   "waven",
-			ApplicationID:                 "app.waven.desktop",
+			ApplicationID:                 "com.waven.player",
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "app.waven.desktop",
+			UniqueID: "com.waven.player",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				if shell == nil {
 					return
