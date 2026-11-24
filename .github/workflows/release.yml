@@ -79,7 +79,7 @@ jobs:
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:linux:deb VERSION="$VERSION" ARCH=amd64
       - name: Build AppImage
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:linux:appimage VERSION="$VERSION" ARCH=amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-linux
           path: |
@@ -122,7 +122,7 @@ jobs:
         run: |
           $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
           wails3 task package:windows VERSION=$env:VERSION ARCH=amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-windows
           path: bin/*installer.exe
@@ -164,7 +164,7 @@ jobs:
           fi
       - name: Build .app and .dmg
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:darwin VERSION="$VERSION" ARCH=${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-macos-${{ matrix.arch }}
           path: |
