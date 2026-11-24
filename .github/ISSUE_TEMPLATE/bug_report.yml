@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible defect in WAVEN
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Check the smoke checklist and existing issues first.
+        Do not paste personal file paths you do not want public.
+  - type: input
+    id: version
+    attributes:
+      label: WAVEN version
+      description: From Settings → About, or the artifact filename.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - Windows
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Platform details
+      description: Desktop session and compositor, or Windows/macOS version.
+      placeholder: Ubuntu 24.04, GNOME 46, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from `WAVEN_DEBUG=1` or the developer console. Redact paths.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: This report contains no credentials or private file paths.
+          required: true

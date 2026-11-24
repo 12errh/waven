@@ -36,7 +36,7 @@ jobs:
             libunwind-dev libgstreamer1.0-dev gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-ugly
-      - run: go test -tags gtk3 ./...
+      - run: go test -tags gtk3 ./internal/... .
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend test
 

@@ -55,6 +55,17 @@ tasks:
     cmds:
       - ./bin/waven
 
+  test:
+    summary: Run Go vet/tests and the frontend lint, typecheck, and unit tests
+    cmds:
+      # Scoped to real packages: frontend/node_modules ships Go sources that
+      # `./...` would otherwise try to compile.
+      - go vet ./internal/... .
+      - go test -tags gtk3 ./internal/... .
+      - npm --prefix frontend run lint
+      - npm --prefix frontend run typecheck
+      - npm --prefix frontend test
+
   # ---------------------------------------------------------------------------
   # Platform builds. CI calls these on native runners; ARCH selects the target.
   # ---------------------------------------------------------------------------

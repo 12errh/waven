@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.syso binary
+*.db binary
+
+package-lock.json linguist-generated=true
+frontend/bindings/** linguist-generated=true

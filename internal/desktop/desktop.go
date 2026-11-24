@@ -610,15 +610,15 @@ func (d *Desktop) createMiniWindow() *application.WebviewWindow {
 	backgroundType, backgroundColour, macBackdrop, windowsBackdrop, translucent := nativeWindowAppearance()
 
 	window := d.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "mini",
-		Title:            "WAVEN Mini",
-		URL:              "/?window=mini",
-		Width:            miniWindowWidth,
-		Height:           miniWindowHeight,
-		MinWidth:         miniWindowMinWidth,
-		MinHeight:        miniWindowMinHeight,
-		MaxWidth:         miniWindowMaxWidth,
-		MaxHeight:        miniWindowMaxHeight,
+		Name:      "mini",
+		Title:     "WAVEN Mini",
+		URL:       "/?window=mini",
+		Width:     miniWindowWidth,
+		Height:    miniWindowHeight,
+		MinWidth:  miniWindowMinWidth,
+		MinHeight: miniWindowMinHeight,
+		MaxWidth:  miniWindowMaxWidth,
+		MaxHeight: miniWindowMaxHeight,
 		// GTK/Wayland resizes a mapped, resizable window to the webview's
 		// natural (full-page) size, which is why the compact layout used to
 		// fill a huge frame. Keeping the mini window fixed at its creation

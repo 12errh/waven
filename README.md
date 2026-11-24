@@ -2,6 +2,12 @@
   <img src="frontend/public/brand/wordmark-banner.png" alt="WAVEN" width="640" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/12errh/waven/actions/workflows/ci.yml"><img src="https://github.com/12errh/waven/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="https://github.com/12errh/waven/actions/workflows/release.yml"><img src="https://github.com/12errh/waven/actions/workflows/release.yml/badge.svg" alt="Release status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license" /></a>
+</p>
+
 # WAVEN
 
 A local-first desktop music player for your own library. WAVEN is a Next.js interface embedded
@@ -148,3 +154,10 @@ docs/                Desktop plan, architecture, and smoke checklist
 - [`docs/desktop-plan.md`](docs/desktop-plan.md) — architecture and phase history
 - [`docs/smoke-checklist.md`](docs/smoke-checklist.md) — release verification checklist
 - [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — current release notes
+- [`CHANGELOG.md`](CHANGELOG.md) — version history
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development loop and checks
+- [`SECURITY.md`](SECURITY.md) — vulnerability reporting
+
+## License
+
+WAVEN is released under the [MIT License](LICENSE).

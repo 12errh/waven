@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Build and usage documentation
+    url: https://github.com/12errh/waven#readme
+    about: Installation, supported formats, shortcuts, and data locations.
+  - name: Release checklist
+    url: https://github.com/12errh/waven/blob/main/docs/smoke-checklist.md
+    about: Manual verification steps for playback, window, tray, and packaging.
