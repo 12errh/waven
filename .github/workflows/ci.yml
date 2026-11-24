@@ -17,12 +17,12 @@ jobs:
     name: Go and frontend
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -46,7 +46,7 @@ jobs:
           fi
 
       - name: Vet Go
-        run: go vet ./internal/... .
+        run: go vet -tags gtk3 ./internal/... .
 
       - name: Test Go
         run: go test -tags gtk3 ./internal/... .

@@ -17,12 +17,12 @@ jobs:
     name: Tests (Linux)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -45,12 +45,12 @@ jobs:
     runs-on: ubuntu-22.04
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -79,7 +79,7 @@ jobs:
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:linux:deb VERSION="$VERSION" ARCH=amd64
       - name: Build AppImage
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:linux:appimage VERSION="$VERSION" ARCH=amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-linux
           path: |
@@ -92,12 +92,12 @@ jobs:
     runs-on: windows-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -122,7 +122,7 @@ jobs:
         run: |
           $env:PATH = "$env:USERPROFILE\go\bin;$env:PATH"
           wails3 task package:windows VERSION=$env:VERSION ARCH=amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-windows
           path: bin/*installer.exe
@@ -141,12 +141,12 @@ jobs:
           - arch: amd64
             runner: macos-13
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -164,7 +164,7 @@ jobs:
           fi
       - name: Build .app and .dmg
         run: PATH="$HOME/go/bin:$PATH" wails3 task package:darwin VERSION="$VERSION" ARCH=${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waven-macos-${{ matrix.arch }}
           path: |

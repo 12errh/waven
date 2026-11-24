@@ -60,7 +60,7 @@ tasks:
     cmds:
       # Scoped to real packages: frontend/node_modules ships Go sources that
       # `./...` would otherwise try to compile.
-      - go vet ./internal/... .
+      - go vet -tags gtk3 ./internal/... .
       - go test -tags gtk3 ./internal/... .
       - npm --prefix frontend run lint
       - npm --prefix frontend run typecheck

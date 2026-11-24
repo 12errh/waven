@@ -27,7 +27,7 @@ Run the narrow checks that cover your change, then the full set:
 
 ```sh
 gofmt -l $(git ls-files '*.go')     # must print nothing
-go vet ./internal/... .
+go vet -tags gtk3 ./internal/... .
 go test -tags gtk3 ./internal/... .
 
 cd frontend
