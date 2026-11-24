@@ -31,7 +31,7 @@
     "eslint-config-next": "16.0.8",
     "postcss": "^8.5.33",
     "tailwindcss": "4.1.11",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "description": "Next.js interface for WAVEN, embedded in the Go/Wails desktop shell.",
   "license": "MIT",
